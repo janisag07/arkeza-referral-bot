@@ -288,10 +288,15 @@ bot.on('message:text', async (ctx) => {
     
     const updatedUser = db.getUser(userId);
     if (updatedUser.is_verified) {
-      await ctx.reply(
-        `✅ ${ctx.from.first_name}, your account is now verified!\n\n` +
-        `Your referrals will now count towards the leaderboard.`
+      const verifyMsg = await ctx.reply(
+        `✅ ${ctx.from.first_name}, your account is now verified!`
       );
+      // Auto-delete verification message after 10 seconds to keep chat clean
+      setTimeout(async () => {
+        try {
+          await ctx.api.deleteMessage(verifyMsg.chat.id, verifyMsg.message_id);
+        } catch (e) { /* message may already be deleted */ }
+      }, 10000);
       
       if (user.referred_by) {
         const referrer = db.getUser(user.referred_by);
