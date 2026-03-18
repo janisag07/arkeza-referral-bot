@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Bot, GrammyError, HttpError, InlineKeyboard } = require('grammy');
+const { Bot, GrammyError, HttpError } = require('grammy');
 const ReferralDatabase = require('./database');
 const fs = require('fs');
 
@@ -41,8 +41,6 @@ bot.command('start', async (ctx) => {
   const userId = ctx.from.id;
   const username = ctx.from.username;
   const firstName = ctx.from.first_name;
-  const isPrivate = ctx.chat.type === 'private';
-  
   let existingUser = db.getUser(userId);
   
   if (existingUser) {
