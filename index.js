@@ -76,9 +76,8 @@ bot.command('start', async (ctx) => {
     }
   }
 
-  // Register user — auto-verified on /start (interaction = proof of real user)
+  // Register user — NOT verified yet (must send message in group)
   db.addUser(userId, username, firstName, referrerId, null);
-  db.verifyUser(userId);
   
   let suspiciousFlags = [];
   
@@ -96,12 +95,11 @@ bot.command('start', async (ctx) => {
   
   if (referrerId) {
     const referrer = db.getUser(referrerId);
-    welcomeMessage += `👋 You were referred by ${formatUsername(referrer)}\n`;
-    welcomeMessage += `✅ Referral confirmed!\n\n`;
+    welcomeMessage += `👋 You were referred by ${formatUsername(referrer)}\n\n`;
   }
   
   welcomeMessage += 
-    `👉 Join the group: ${GROUP_LINK}\n\n` +
+    `👉 Join the group and send a message to verify: ${GROUP_LINK}\n\n` +
     `🔗 Your Referral Link:\n${referralLink}\n\n` +
     `Share this link to invite others and climb the leaderboard!\n\n` +
     `📊 Commands:\n` +
@@ -109,20 +107,6 @@ bot.command('start', async (ctx) => {
     `/stats - Your referral statistics`;
 
   await ctx.reply(welcomeMessage);
-
-  // Notify referrer
-  if (referrerId && !suspiciousFlags.length) {
-    try {
-      await bot.api.sendMessage(
-        referrerId,
-        `🎉 New referral!\n\n` +
-        `User: ${formatUsername({ username, first_name: firstName })}\n` +
-        `✅ Verified instantly!`
-      );
-    } catch (error) {
-      console.error('Failed to notify referrer:', error.message);
-    }
-  }
 
   // Notify admins of suspicious joins
   if (suspiciousFlags.length > 0 && ADMIN_IDS.length > 0) {
@@ -290,6 +274,43 @@ bot.command('admin', async (ctx) => {
 
     default:
       await ctx.reply('❌ Unknown admin command. Use /admin to see available commands.');
+  }
+});
+
+// Message handler — verifies users when they send a message in the group
+bot.on('message:text', async (ctx) => {
+  if (ctx.message.text.startsWith('/')) return;
+  if (ctx.chat.type === 'private') return;
+  
+  const userId = ctx.from.id;
+  const user = db.getUser(userId);
+  
+  if (user && !user.is_verified) {
+    db.incrementMessageCount(userId);
+    
+    const updatedUser = db.getUser(userId);
+    if (updatedUser.is_verified) {
+      await ctx.reply(
+        `✅ ${ctx.from.first_name}, your account is now verified!\n\n` +
+        `Your referrals will now count towards the leaderboard.`
+      );
+      
+      if (user.referred_by) {
+        const referrer = db.getUser(user.referred_by);
+        if (referrer) {
+          try {
+            await bot.api.sendMessage(
+              user.referred_by,
+              `🎉 Your referral just got verified!\n\n` +
+              `User: ${formatUsername(ctx.from)}\n` +
+              `✅ Confirmed!`
+            );
+          } catch (error) {
+            console.error('Failed to notify referrer:', error.message);
+          }
+        }
+      }
+    }
   }
 });
 
