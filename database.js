@@ -128,8 +128,10 @@ class ReferralDatabase {
       `).run(user.referred_by);
     }
 
+    this.db.prepare('DELETE FROM join_events WHERE user_id = ? OR referrer_id = ?').run(userId, userId);
+    this.db.prepare('DELETE FROM referral_stats WHERE user_id = ?').run(userId);
+    this.db.prepare('UPDATE users SET referred_by = NULL WHERE referred_by = ?').run(userId);
     this.db.prepare('DELETE FROM users WHERE user_id = ?').run(userId);
-    this.db.prepare('DELETE FROM join_events WHERE user_id = ?').run(userId);
 
     return true;
   }
