@@ -1,0 +1,17 @@
+{
+  "name": "arkeza-referral-bot",
+  "version": "1.0.0",
+  "description": "Telegram Referral Tracking Bot for Arkeza Community",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": ["telegram", "bot", "referral", "tracking", "web3"],
+  "author": "Patrick oke",
+  "license": "MIT",
+  "dependencies": {
+    "grammy": "^1.21.1",
+    "better-sqlite3": "^9.4.3",
+    "dotenv": "^16.4.5"
+  }
+}
