@@ -98,7 +98,7 @@ bot.command('start', async (ctx) => {
   
   welcomeMessage += 
     `🔗 Your Referral Link:\n${referralLink}\n\n` +
-    `💬 Send at least ${process.env.MIN_MESSAGES_FOR_VERIFICATION || 1} message(s) to verify your referral!\n\n` +
+    `💬 To confirm your invite, just send a message in the group!\n\n` +
     `📊 Commands:\n` +
     `/leaderboard - View top referrers\n` +
     `/stats - Your referral statistics`;
@@ -357,7 +357,6 @@ bot.start({
     console.log(`✅ Bot @${botInfo.username} is now running!`);
     console.log(`📊 Admin IDs: ${ADMIN_IDS.join(', ') || 'None configured'}`);
     console.log(`⚙️ Settings:`);
-    console.log(`   - Min account age: ${MIN_ACCOUNT_AGE_DAYS} days`);
     console.log(`   - Rate limit: ${RATE_LIMIT_MAX_JOINS} joins per ${RATE_LIMIT_WINDOW_HOURS}h`);
     console.log(`   - Min messages for verification: ${process.env.MIN_MESSAGES_FOR_VERIFICATION || 1}`);
   }
