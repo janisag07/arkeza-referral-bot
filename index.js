@@ -4,6 +4,8 @@ const ReferralDatabase = require('./database');
 const fs = require('fs');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
+const BOT_USERNAME = process.env.BOT_USERNAME || 'Arkezabot';
+const GROUP_LINK = process.env.GROUP_LINK || 'https://t.me/arkezahub';
 const ADMIN_IDS = process.env.ADMIN_IDS?.split(',').map(id => parseInt(id.trim())) || [];
 const RATE_LIMIT_MAX_JOINS = parseInt(process.env.RATE_LIMIT_MAX_JOINS || 10);
 const RATE_LIMIT_WINDOW_HOURS = parseInt(process.env.RATE_LIMIT_WINDOW_HOURS || 24);
@@ -23,14 +25,13 @@ const formatUsername = (user) => {
   return user.first_name || `User ${user.user_id}`;
 };
 
+const getReferralLink = (userId) => `https://t.me/${BOT_USERNAME}?start=ref_${userId}`;
+
 const checkRateLimit = (referrerId) => {
   const recentJoins = db.getRecentJoins(referrerId, RATE_LIMIT_WINDOW_HOURS);
   
   if (recentJoins.count >= RATE_LIMIT_MAX_JOINS) {
-    return {
-      exceeded: true,
-      count: recentJoins.count
-    };
+    return { exceeded: true, count: recentJoins.count };
   }
   
   return { exceeded: false, count: recentJoins.count };
@@ -40,12 +41,13 @@ bot.command('start', async (ctx) => {
   const userId = ctx.from.id;
   const username = ctx.from.username;
   const firstName = ctx.from.first_name;
+  const isPrivate = ctx.chat.type === 'private';
   
   let existingUser = db.getUser(userId);
   
   if (existingUser) {
     const stats = db.getReferralStats(userId);
-    const referralLink = `https://t.me/arkezahub?start=ref_${userId}`;
+    const referralLink = getReferralLink(userId);
     
     await ctx.reply(
       `🌟 Welcome back, ${firstName}!\n\n` +
@@ -53,7 +55,8 @@ bot.command('start', async (ctx) => {
       `✅ Verified Referrals: ${stats.verified_referrals}\n` +
       `👥 Total Referrals: ${stats.total_referrals}\n\n` +
       `🔗 Your Referral Link:\n${referralLink}\n\n` +
-      `Share this link to earn referrals!`
+      `Share this link to earn referrals!\n\n` +
+      `👉 Join the group: ${GROUP_LINK}`
     );
     return;
   }
@@ -75,7 +78,9 @@ bot.command('start', async (ctx) => {
     }
   }
 
+  // Register user — auto-verified on /start (interaction = proof of real user)
   db.addUser(userId, username, firstName, referrerId, null);
+  db.verifyUser(userId);
   
   let suspiciousFlags = [];
   
@@ -87,24 +92,41 @@ bot.command('start', async (ctx) => {
     }
   }
 
-  const referralLink = `https://t.me/arkezahub?start=ref_${userId}`;
+  const referralLink = getReferralLink(userId);
   
   let welcomeMessage = `🎉 Welcome to Arkeza Hub, ${firstName}!\n\n`;
   
   if (referrerId) {
     const referrer = db.getUser(referrerId);
-    welcomeMessage += `👋 You were referred by ${formatUsername(referrer)}\n\n`;
+    welcomeMessage += `👋 You were referred by ${formatUsername(referrer)}\n`;
+    welcomeMessage += `✅ Referral confirmed!\n\n`;
   }
   
   welcomeMessage += 
+    `👉 Join the group: ${GROUP_LINK}\n\n` +
     `🔗 Your Referral Link:\n${referralLink}\n\n` +
-    `💬 To confirm your invite, just send a message in the group!\n\n` +
+    `Share this link to invite others and climb the leaderboard!\n\n` +
     `📊 Commands:\n` +
     `/leaderboard - View top referrers\n` +
     `/stats - Your referral statistics`;
 
   await ctx.reply(welcomeMessage);
 
+  // Notify referrer
+  if (referrerId && !suspiciousFlags.length) {
+    try {
+      await bot.api.sendMessage(
+        referrerId,
+        `🎉 New referral!\n\n` +
+        `User: ${formatUsername({ username, first_name: firstName })}\n` +
+        `✅ Verified instantly!`
+      );
+    } catch (error) {
+      console.error('Failed to notify referrer:', error.message);
+    }
+  }
+
+  // Notify admins of suspicious joins
   if (suspiciousFlags.length > 0 && ADMIN_IDS.length > 0) {
     for (const adminId of ADMIN_IDS) {
       try {
@@ -139,10 +161,8 @@ bot.command('leaderboard', async (ctx) => {
     const medal = medals[index] || `${rank}.`;
     const name = user.username ? `@${user.username}` : user.first_name || `User ${user.user_id}`;
     
-    message += `${medal} ${name}: ${user.verified_referrals} verified (${user.total_referrals} total)\n`;
+    message += `${medal} ${name}: ${user.verified_referrals} referrals\n`;
   });
-
-  message += '\n💬 Send messages to verify your referrals!';
 
   await ctx.reply(message, { parse_mode: 'Markdown' });
 });
@@ -157,18 +177,12 @@ bot.command('stats', async (ctx) => {
   }
 
   const stats = db.getReferralStats(userId);
-  const referralLink = `https://t.me/arkezahub?start=ref_${userId}`;
-  
-  const verificationStatus = user.is_verified 
-    ? '✅ Verified' 
-    : `⏳ Pending (${user.message_count}/${process.env.MIN_MESSAGES_FOR_VERIFICATION || 1} messages)`;
+  const referralLink = getReferralLink(userId);
 
   await ctx.reply(
     `📊 *Your Referral Stats*\n\n` +
-    `Status: ${verificationStatus}\n` +
     `✅ Verified Referrals: ${stats.verified_referrals}\n` +
-    `👥 Total Referrals: ${stats.total_referrals}\n` +
-    `💬 Messages Sent: ${user.message_count}\n\n` +
+    `👥 Total Referrals: ${stats.total_referrals}\n\n` +
     `🔗 Your Referral Link:\n\`${referralLink}\`\n\n` +
     `Share this link to grow your referrals!`,
     { parse_mode: 'Markdown' }
@@ -223,7 +237,7 @@ bot.command('admin', async (ctx) => {
       suspicious.slice(0, 20).forEach(user => {
         const name = user.username ? `@${user.username}` : user.first_name || `User ${user.user_id}`;
         const joinDate = new Date(user.joined_at * 1000).toLocaleDateString();
-        message += `• ${name} (ID: ${user.user_id})\n  Joined: ${joinDate} | Messages: ${user.message_count}\n`;
+        message += `• ${name} (ID: ${user.user_id})\n  Joined: ${joinDate}\n`;
       });
 
       if (suspicious.length > 20) {
@@ -281,40 +295,6 @@ bot.command('admin', async (ctx) => {
   }
 });
 
-bot.on('message:text', async (ctx) => {
-  if (ctx.message.text.startsWith('/')) return;
-  
-  const userId = ctx.from.id;
-  const user = db.getUser(userId);
-  
-  if (user && !user.is_verified) {
-    db.incrementMessageCount(userId);
-    
-    const updatedUser = db.getUser(userId);
-    if (updatedUser.is_verified) {
-      await ctx.reply(
-        `✅ Congratulations! Your account is now verified!\n\n` +
-        `Your referrals will now count towards the leaderboard.`
-      );
-      
-      if (user.referred_by) {
-        const referrer = db.getUser(user.referred_by);
-        if (referrer) {
-          try {
-            await bot.api.sendMessage(
-              user.referred_by,
-              `🎉 One of your referrals just got verified!\n\n` +
-              `User: ${formatUsername(ctx.from)}`
-            );
-          } catch (error) {
-            console.error('Failed to notify referrer:', error.message);
-          }
-        }
-      }
-    }
-  }
-});
-
 bot.on('my_chat_member', async (ctx) => {
   const status = ctx.myChatMember.new_chat_member.status;
   
@@ -358,6 +338,6 @@ bot.start({
     console.log(`📊 Admin IDs: ${ADMIN_IDS.join(', ') || 'None configured'}`);
     console.log(`⚙️ Settings:`);
     console.log(`   - Rate limit: ${RATE_LIMIT_MAX_JOINS} joins per ${RATE_LIMIT_WINDOW_HOURS}h`);
-    console.log(`   - Min messages for verification: ${process.env.MIN_MESSAGES_FOR_VERIFICATION || 1}`);
+    console.log(`   - Group: ${GROUP_LINK}`);
   }
 });
