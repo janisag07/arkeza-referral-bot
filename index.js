@@ -136,7 +136,7 @@ bot.command('leaderboard', async (ctx) => {
   }
 
   const medals = ['🥇', '🥈', '🥉'];
-  let message = '🏆 *Top Referrers* 🏆\n\n';
+  let message = '🏆 Top Referrers 🏆\n\n';
 
   leaderboard.forEach((user, index) => {
     const rank = index + 1;
@@ -146,7 +146,7 @@ bot.command('leaderboard', async (ctx) => {
     message += `${medal} ${name}: ${user.verified_referrals} referrals\n`;
   });
 
-  await ctx.reply(message, { parse_mode: 'Markdown' });
+  await ctx.reply(message);
 });
 
 bot.command('stats', async (ctx) => {
@@ -162,12 +162,11 @@ bot.command('stats', async (ctx) => {
   const referralLink = getReferralLink(userId);
 
   await ctx.reply(
-    `📊 *Your Referral Stats*\n\n` +
+    `📊 Your Referral Stats\n\n` +
     `✅ Verified Referrals: ${stats.verified_referrals}\n` +
     `👥 Total Referrals: ${stats.total_referrals}\n\n` +
-    `🔗 Your Referral Link:\n\`${referralLink}\`\n\n` +
-    `Share this link to grow your referrals!`,
-    { parse_mode: 'Markdown' }
+    `🔗 Your Referral Link:\n${referralLink}\n\n` +
+    `Share this link to grow your referrals!`
   );
 });
 
@@ -182,12 +181,11 @@ bot.command('admin', async (ctx) => {
 
   if (!command) {
     await ctx.reply(
-      '🔧 *Admin Commands*\n\n' +
+      '🔧 Admin Commands\n\n' +
       '/admin stats - Overall statistics\n' +
       '/admin suspicious - List suspicious users\n' +
-      '/admin remove @username - Remove a user\n' +
-      '/admin export - Export CSV data',
-      { parse_mode: 'Markdown' }
+      '/admin remove <user_id> - Remove a user\n' +
+      '/admin export - Export CSV data'
     );
     return;
   }
@@ -196,12 +194,11 @@ bot.command('admin', async (ctx) => {
     case 'stats': {
       const stats = db.getTotalStats();
       await ctx.reply(
-        `📊 *System Statistics*\n\n` +
+        `📊 System Statistics\n\n` +
         `👥 Total Users: ${stats.totalUsers}\n` +
         `✅ Verified Users: ${stats.verifiedUsers}\n` +
         `⚠️ Suspicious Users: ${stats.suspiciousUsers}\n` +
-        `🔗 Total Referrals: ${stats.totalReferrals}`,
-        { parse_mode: 'Markdown' }
+        `🔗 Total Referrals: ${stats.totalReferrals}`
       );
       break;
     }
@@ -226,7 +223,7 @@ bot.command('admin', async (ctx) => {
         message += `\n...and ${suspicious.length - 20} more`;
       }
 
-      await ctx.reply(message, { parse_mode: 'Markdown' });
+      await ctx.reply(message);
       break;
     }
 
@@ -279,6 +276,7 @@ bot.command('admin', async (ctx) => {
 
 // Message handler — verifies users when they send a message in the group
 bot.on('message:text', async (ctx) => {
+  console.log(`📨 Message from ${ctx.from.id} (@${ctx.from.username}) in ${ctx.chat.type} (${ctx.chat.title || 'private'}): "${ctx.message.text.substring(0, 50)}"`);
   if (ctx.message.text.startsWith('/')) return;
   if (ctx.chat.type === 'private') return;
   
