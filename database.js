@@ -80,7 +80,16 @@ class ReferralDatabase {
     `).run(userId);
     
     const user = this.getUser(userId);
-    if (user && user.message_count >= parseInt(process.env.MIN_MESSAGES_FOR_VERIFICATION || 1) && !user.is_verified) {
+    const minMessages = parseInt(process.env.MIN_MESSAGES_FOR_VERIFICATION || 3);
+    const minHours = parseInt(process.env.MIN_HOURS_FOR_VERIFICATION || 24);
+    const now = Math.floor(Date.now() / 1000);
+    const hoursSinceJoin = (now - user.joined_at) / 3600;
+    
+    // Only verify if: enough messages AND 24h has passed since joining
+    if (user && 
+        user.message_count >= minMessages && 
+        hoursSinceJoin >= minHours && 
+        !user.is_verified) {
       this.verifyUser(userId);
     }
     
