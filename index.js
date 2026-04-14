@@ -4,6 +4,18 @@ const ReferralDatabase = require('./database');
 const arkezaApi = require('./arkeza-api');
 const { startWebhookServer, paths } = require('./webhook-server');
 const fs = require('fs');
+const { execSync } = require('child_process');
+
+// ---- Build identity (so /version and boot log unambiguously identify which code is live) ----
+const BOOT_TIME = Date.now();
+let GIT_SHA = 'unknown';
+let GIT_SUBJECT = 'unknown';
+try {
+  GIT_SHA = execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
+    .toString().trim();
+  GIT_SUBJECT = execSync('git log -1 --pretty=%s', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
+    .toString().trim().slice(0, 80);
+} catch (_) { /* not a git checkout — leave as 'unknown' */ }
 
 // ---- Config ----
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -15,6 +27,7 @@ const RATE_LIMIT_WINDOW_HOURS = parseInt(process.env.RATE_LIMIT_WINDOW_HOURS || 
 const ANNOUNCEMENT_CHANNEL_ID = process.env.ANNOUNCEMENT_CHANNEL_ID || '';
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || '';
 const WEBHOOK_SECRET_TOKEN = process.env.WEBHOOK_SECRET_TOKEN || '';
+const WELCOME_NEW_MEMBERS = (process.env.WELCOME_NEW_MEMBERS || 'true').toLowerCase() === 'true';
 
 if (!BOT_TOKEN) {
   console.error('❌ BOT_TOKEN not found in .env file');
@@ -216,6 +229,65 @@ bot.command('link', async (ctx) => {
     return;
   }
   await handleLinkToken(ctx, arg);
+});
+
+// ---- /version (so anyone can verify WHICH code is running) ----
+//
+// Whenever there is doubt about what code the server is actually executing
+// (e.g. after a redeploy, or when multiple bot codebases have historically
+// been on the server), typing /version in chat returns the exact git SHA
+// and boot time. This is the fastest possible way to confirm a deploy.
+
+bot.command('version', async (ctx) => {
+  const uptimeSec = Math.floor(process.uptime());
+  const bootIso = new Date(BOOT_TIME).toISOString();
+  await ctx.reply(
+    `🤖 Arkeza Bot\n` +
+      `• Repo: janisag07/arkeza-referral-bot\n` +
+      `• Commit: ${GIT_SHA}\n` +
+      `• Subject: ${GIT_SUBJECT}\n` +
+      `• Booted: ${bootIso}\n` +
+      `• Uptime: ${uptimeSec}s\n` +
+      `• Mode: ${runtimeMode}\n` +
+      `• Arkeza API: ${arkezaApi._config.BASE_URL}`
+  );
+});
+
+// ---- New member welcome (in-group, NOT DM — avoids 403 spam) ----
+//
+// Previous bot versions on the server tried to DM new joiners with a link
+// prompt; Telegram blocks that with "bot can't initiate conversation with a
+// user" unless the user has started the bot first, producing hundreds of
+// 403 errors. The correct approach is to post a short welcome in the group
+// itself, mentioning the user and linking them to the bot's /start URL.
+// Auto-delete after 60 s so the chat stays clean.
+
+bot.on('message:new_chat_members', async (ctx) => {
+  if (!WELCOME_NEW_MEMBERS) return;
+  const newMembers = ctx.message.new_chat_members || [];
+  for (const member of newMembers) {
+    if (member.is_bot) continue;
+    const displayName = member.username
+      ? `@${member.username}`
+      : member.first_name || `User ${member.id}`;
+    const deepLink = `https://t.me/${BOT_USERNAME}`;
+    console.log(`👋 New member: ${member.id} (${displayName})`);
+    try {
+      const msg = await ctx.reply(
+        `👋 Welcome ${displayName}!\n\n` +
+          `Start the bot here to link your Arkeza account and earn XP:\n` +
+          deepLink
+      );
+      // Auto-delete after 60 s to keep the group tidy.
+      setTimeout(async () => {
+        try {
+          await ctx.api.deleteMessage(msg.chat.id, msg.message_id);
+        } catch (_) { /* message may already be deleted */ }
+      }, 60_000);
+    } catch (err) {
+      console.error(`Failed to welcome ${member.id}: ${err.message}`);
+    }
+  }
 });
 
 // ---- /profile (Arkeza app data) ----
@@ -600,6 +672,9 @@ async function main() {
   const mode = WEBHOOK_BASE_URL ? 'webhook' : 'polling';
   console.log('================================================');
   console.log(`🚀 Arkeza Referral Bot starting (mode: ${mode.toUpperCase()})`);
+  console.log(`   Commit:  ${GIT_SHA}`);
+  console.log(`   Subject: ${GIT_SUBJECT}`);
+  console.log(`   Booted:  ${new Date(BOOT_TIME).toISOString()}`);
   console.log('================================================');
 
   // Initialize bot so bot.api.* is usable.
