@@ -403,19 +403,13 @@ bot.command('profile', async (ctx) => {
       await ctx.reply('❌ You are not linked yet. Open the link from the Arkeza app first.');
       return;
     }
-    // API unreachable → fall back to in-bot referral stats if user is registered.
-    const localUser = db.getUser(telegramId);
-    if (localUser) {
-      const stats = db.getReferralStats(telegramId);
-      await ctx.reply(
-        `👤 Your In-Bot Profile\n\n` +
-          `(Arkeza app data temporarily unavailable)\n\n` +
-          `✅ Verified Referrals: ${stats.verified_referrals}\n` +
-          `👥 Total Referrals: ${stats.total_referrals}`
-      );
-      return;
-    }
-    await ctx.reply(`❌ Could not fetch profile: ${result.message}`);
+    // API unreachable → honest "coming soon" rather than confusing local stats
+    // that look like Arkeza app stats but aren't.
+    await ctx.reply(
+      `⏳ Profile coming soon\n\n` +
+        `Your XP and referral stats from the Arkeza app will appear here ` +
+        `once the API integration is finalized. Thanks for your patience!`
+    );
     return;
   }
 
@@ -466,13 +460,16 @@ async function renderArkezaLeaderboard(ctx, type) {
   const result = await arkezaApi.getLeaderboard(telegramId, type);
 
   if (!result.ok) {
-    // Arkeza API unreachable / encryption not configured yet → graceful
-    // fallback to in-bot referral leaderboard so the community still
-    // sees something useful instead of an error.
-    console.warn(`[leaderboard] Arkeza API failed (${result.message}), falling back to in-bot leaderboard`);
-    await renderInBotLeaderboard(
-      ctx,
-      `ℹ️ Arkeza app leaderboard temporarily unavailable; showing in-bot referrals.`
+    // Arkeza API unreachable / encryption not configured yet.
+    // Don't silently show stale pre-migration DB numbers — it confuses
+    // users into thinking those are live counts. Instead, tell the truth
+    // and let them know the live leaderboard is coming.
+    console.warn(`[leaderboard] Arkeza API failed (${result.message}), showing placeholder`);
+    await ctx.reply(
+      `⏳ Leaderboard coming soon\n\n` +
+        `The live XP and Referral leaderboards from the Arkeza app will appear here ` +
+        `once the API integration is finalized.\n\n` +
+        `Thanks for your patience!`
     );
     return;
   }
