@@ -37,6 +37,18 @@ echo "   dir:  $BOT_DIR"
 echo "   time: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
 echo ""
 
+# ---- FULL directory backup (belt-and-braces) ----
+# Before touching anything, snapshot the ENTIRE bot directory (including
+# ignored files like .env, *.db, logs) so we can roll back to the exact
+# pre-deploy state if something goes wrong.
+FULL_BACKUP="/tmp/arkeza-FULL-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+echo "== Creating FULL pre-deploy backup (incl. .env, DB, logs) =="
+tar --exclude='node_modules' --exclude='.git/objects' -czf "$FULL_BACKUP" -C "$(dirname "$BOT_DIR")" "$(basename "$BOT_DIR")" 2>/dev/null
+BACKUP_SIZE=$(du -h "$FULL_BACKUP" 2>/dev/null | cut -f1)
+echo "   → $FULL_BACKUP ($BACKUP_SIZE)"
+echo "   To restore: tar -xzf $FULL_BACKUP -C $(dirname "$BOT_DIR")/"
+echo ""
+
 # Show what's about to be wiped so there's a record.
 if [ -n "$(git status --porcelain)" ]; then
   echo "== Local changes about to be WIPED =="
@@ -47,11 +59,11 @@ if [ -n "$(git status --porcelain)" ]; then
   echo ""
 fi
 
-# Find any untracked files that aren't in .gitignore and back them up.
+# Find any untracked files that aren't in .gitignore and back them up separately too.
 UNTRACKED=$(git ls-files --others --exclude-standard)
 if [ -n "$UNTRACKED" ]; then
   BACKUP="/tmp/arkeza-untracked-backup-$(date +%s).tar.gz"
-  echo "== Backing up untracked files to $BACKUP =="
+  echo "== Also backing up untracked files individually to $BACKUP =="
   echo "$UNTRACKED" | xargs -I{} echo "   {}"
   tar -czf "$BACKUP" $UNTRACKED 2>/dev/null || echo "   (backup skipped)"
   echo ""
