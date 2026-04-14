@@ -697,9 +697,13 @@ async function main() {
   }
 
   // Express server (always on — handles inbound Arkeza webhooks regardless of TG mode).
+  // IMPORTANT: register the Telegram-webhook route only in webhook mode.
+  // grammY throws "already started via webhooks" if we call bot.start() after
+  // webhookCallback() has been bound to the same Bot instance.
   serverRef = await startWebhookServer({
     bot,
     onArkezaEvent: handleArkezaEvent,
+    enableTelegramWebhook: mode === 'webhook',
     getStatus: () => ({
       mode: runtimeMode,
       bot_username: bot.botInfo?.username || null,

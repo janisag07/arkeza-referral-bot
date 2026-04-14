@@ -29,8 +29,12 @@ const ARKEZA_SECRET = process.env.ARKEZA_WEBHOOK_SECRET || '';
  * @param {import('grammy').Bot} opts.bot
  * @param {(payload: object) => Promise<void>} opts.onArkezaEvent
  * @param {() => object} [opts.getStatus] Optional status snapshot for /health
+ * @param {boolean} [opts.enableTelegramWebhook] If false, the /webhook/telegram
+ *   route is NOT registered. Required when the bot will be started via
+ *   bot.start() (long-polling), because grammY forbids having webhookCallback()
+ *   and bot.start() active on the same Bot instance.
  */
-function startWebhookServer({ bot, onArkezaEvent, getStatus }) {
+function startWebhookServer({ bot, onArkezaEvent, getStatus, enableTelegramWebhook = true }) {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
@@ -51,14 +55,23 @@ function startWebhookServer({ bot, onArkezaEvent, getStatus }) {
     res.json({ ...base, ...extra });
   });
 
-  // ---- Telegram updates ----
+  // ---- Telegram updates (only in webhook mode) ----
   // grammY's webhookCallback handles secret-token verification when secretToken is set.
-  app.post(
-    TELEGRAM_PATH,
-    webhookCallback(bot, 'express', {
-      secretToken: TG_SECRET || undefined,
-    })
-  );
+  // Skipped entirely in polling mode to avoid grammY's "already started via webhooks" error.
+  if (enableTelegramWebhook) {
+    app.post(
+      TELEGRAM_PATH,
+      webhookCallback(bot, 'express', {
+        secretToken: TG_SECRET || undefined,
+      })
+    );
+  } else {
+    app.post(TELEGRAM_PATH, (_req, res) => {
+      res
+        .status(410)
+        .json({ success: false, message: 'Bot is running in long-polling mode; Telegram webhook endpoint disabled.' });
+    });
+  }
 
   // ---- Arkeza milestone / announcement events ----
   app.post(ARKEZA_PATH, async (req, res) => {
@@ -94,7 +107,11 @@ function startWebhookServer({ bot, onArkezaEvent, getStatus }) {
   return new Promise((resolve) => {
     const server = app.listen(PORT, () => {
       console.log(`🌐 Webhook server listening on :${PORT}`);
-      console.log(`   • Telegram updates → POST ${TELEGRAM_PATH}`);
+      if (enableTelegramWebhook) {
+        console.log(`   • Telegram updates → POST ${TELEGRAM_PATH}`);
+      } else {
+        console.log(`   • Telegram updates → (disabled, bot uses long-polling)`);
+      }
       console.log(`   • Arkeza events    → POST ${ARKEZA_PATH}`);
       console.log(`   • Health           → GET  /health`);
       resolve(server);
