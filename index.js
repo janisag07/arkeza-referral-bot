@@ -29,6 +29,14 @@ const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || '';
 const WEBHOOK_SECRET_TOKEN = process.env.WEBHOOK_SECRET_TOKEN || '';
 const WELCOME_NEW_MEMBERS = (process.env.WELCOME_NEW_MEMBERS || 'true').toLowerCase() === 'true';
 
+// ---- Info URLs (exposed via /website, /twitter, /whitepaper, /app, /contract) ----
+const WEBSITE_URL = process.env.WEBSITE_URL || 'https://arkeza.io/';
+const TWITTER_URL = process.env.TWITTER_URL || 'https://x.com/arkeza_hub';
+const WHITEPAPER_URL = process.env.WHITEPAPER_URL || 'https://arkeza.io/assets/document/whitepaper.pdf';
+const APP_ANDROID_URL = process.env.APP_ANDROID_URL || 'https://play.google.com/store/apps/details?id=com.arkeza.app';
+const APP_IOS_URL = process.env.APP_IOS_URL || 'https://apps.apple.com/us/app/arkeza/id6757733204';
+const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS || 'Token Launch Upcoming — Stay tuned!';
+
 if (!BOT_TOKEN) {
   console.error('❌ BOT_TOKEN not found in .env file');
   process.exit(1);
@@ -104,7 +112,11 @@ async function handleLinkToken(ctx, token) {
     .text('👤 Profile', 'show_profile')
     .text('🏆 Leaderboard', 'show_leaderboard_xp')
     .row()
-    .url('💬 Join Group', GROUP_LINK);
+    .url('💬 Join Group', GROUP_LINK)
+    .url('🌐 Website', WEBSITE_URL)
+    .row()
+    .url('📱 Android', APP_ANDROID_URL)
+    .url('📱 iOS', APP_IOS_URL);
 
   await ctx.reply(
     `✅ Successfully linked${arkezaUsername ? ` as ${arkezaUsername}` : ''}!\n\n` +
@@ -253,6 +265,50 @@ bot.command('version', async (ctx) => {
   );
 });
 
+// ---- Info commands (quick-links to Arkeza resources) ----
+
+bot.command('website', async (ctx) => {
+  await ctx.reply(`🌐 Arkeza website:\n${WEBSITE_URL}`);
+});
+
+bot.command('twitter', async (ctx) => {
+  await ctx.reply(`🐦 Arkeza on X:\n${TWITTER_URL}`);
+});
+
+bot.command('whitepaper', async (ctx) => {
+  await ctx.reply(`📄 Arkeza whitepaper:\n${WHITEPAPER_URL}`);
+});
+
+bot.command('app', async (ctx) => {
+  await ctx.reply(
+    `📱 Get the Arkeza app:\n\n` +
+      `Android: ${APP_ANDROID_URL}\n` +
+      `iOS:     ${APP_IOS_URL}`
+  );
+});
+
+bot.command('contract', async (ctx) => {
+  await ctx.reply(`📜 Contract address:\n${CONTRACT_ADDRESS}`);
+});
+
+bot.command('help', async (ctx) => {
+  await ctx.reply(
+    `🤖 Arkeza Bot — Commands\n\n` +
+      `/start            — Link your Arkeza account (via deep-link) or view your stats\n` +
+      `/link <token>     — Manual alternative to the deep-link\n` +
+      `/profile          — Your Arkeza profile (XP, referrals)\n` +
+      `/leaderboard      — XP + Referral leaderboards\n` +
+      `/stats            — Your in-bot referral stats\n` +
+      `/website          — Arkeza website\n` +
+      `/twitter          — Arkeza on X\n` +
+      `/whitepaper       — Whitepaper PDF\n` +
+      `/app              — Android + iOS app links\n` +
+      `/contract         — Token contract address\n` +
+      `/version          — Which bot code is live\n` +
+      `/help             — This message`
+  );
+});
+
 // ---- New member welcome (in-group, NOT DM — avoids 403 spam) ----
 //
 // Previous bot versions on the server tried to DM new joiners with a link
@@ -272,11 +328,17 @@ bot.on('message:new_chat_members', async (ctx) => {
       : member.first_name || `User ${member.id}`;
     const deepLink = `https://t.me/${BOT_USERNAME}`;
     console.log(`👋 New member: ${member.id} (${displayName})`);
+    const welcomeKb = new InlineKeyboard()
+      .url('🚀 Start Bot', deepLink)
+      .url('🌐 Website', WEBSITE_URL)
+      .row()
+      .url('📱 App (Android)', APP_ANDROID_URL)
+      .url('📱 App (iOS)', APP_IOS_URL);
     try {
       const msg = await ctx.reply(
         `👋 Welcome ${displayName}!\n\n` +
-          `Start the bot here to link your Arkeza account and earn XP:\n` +
-          deepLink
+          `Tap "Start Bot" to link your Arkeza account and earn XP.`,
+        { reply_markup: welcomeKb }
       );
       // Auto-delete after 60 s to keep the group tidy.
       setTimeout(async () => {

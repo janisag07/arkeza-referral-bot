@@ -14,10 +14,26 @@
  */
 
 const axios = require('axios');
+const arkezaCrypto = require('./arkeza-crypto');
 
 const BASE_URL = process.env.ARKEZA_API_BASE_URL || 'https://arkza-api.arkeza.io/api/telegram/v1';
 const API_KEY = process.env.ARKEZA_API_KEY || '';
 const TIMEOUT_MS = parseInt(process.env.ARKEZA_API_TIMEOUT_MS || '10000', 10);
+
+/**
+ * Transparently wrap an axios POST so that if encryption is configured
+ * we send an encrypted envelope, otherwise we send plain JSON.
+ * Keeps call sites (linkUser, getUserData, etc.) unchanged.
+ */
+async function postWithOptionalEncryption(endpoint, payload) {
+  if (arkezaCrypto.isConfigured()) {
+    const envelope = arkezaCrypto.encryptPayload(payload);
+    const { data } = await client.post(endpoint, envelope);
+    return arkezaCrypto.decryptResponse(data);
+  }
+  const { data } = await client.post(endpoint, payload);
+  return data;
+}
 
 const client = axios.create({
   baseURL: BASE_URL,
@@ -58,7 +74,7 @@ function wrapError(err, endpoint) {
  */
 async function linkUser(telegramId, token) {
   try {
-    const { data } = await client.post('/link-user', {
+    const data = await postWithOptionalEncryption('/link-user', {
       telegramId: String(telegramId),
       token,
     });
@@ -77,7 +93,7 @@ async function linkUser(telegramId, token) {
  */
 async function getUserData(telegramId) {
   try {
-    const { data } = await client.post('/user-data', {
+    const data = await postWithOptionalEncryption('/user-data', {
       telegramId: String(telegramId),
     });
     return { ok: !!data?.success, message: data?.message || '', data: data?.data };
@@ -98,7 +114,7 @@ async function getLeaderboard(telegramId, type) {
     return { ok: false, status: -1, message: `Invalid leaderboard type: ${type}` };
   }
   try {
-    const { data } = await client.post('/leaderboard', {
+    const data = await postWithOptionalEncryption('/leaderboard', {
       telegramId: String(telegramId),
       type,
     });
@@ -117,7 +133,7 @@ async function getLeaderboard(telegramId, type) {
  */
 async function isLinked(telegramId) {
   try {
-    const { data } = await client.post('/is-linked', {
+    const data = await postWithOptionalEncryption('/is-linked', {
       telegramId: String(telegramId),
     });
     return { ok: !!data?.success, message: data?.message || '', data: data?.data };
@@ -133,5 +149,10 @@ module.exports = {
   isLinked,
   // exported for tests/diagnostics
   _client: client,
-  _config: { BASE_URL, hasApiKey: !!API_KEY, TIMEOUT_MS },
+  _config: {
+    BASE_URL,
+    hasApiKey: !!API_KEY,
+    TIMEOUT_MS,
+    encryption: arkezaCrypto._config,
+  },
 };
