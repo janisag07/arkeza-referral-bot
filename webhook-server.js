@@ -28,19 +28,27 @@ const ARKEZA_SECRET = process.env.ARKEZA_WEBHOOK_SECRET || '';
  * @param {object} opts
  * @param {import('grammy').Bot} opts.bot
  * @param {(payload: object) => Promise<void>} opts.onArkezaEvent
+ * @param {() => object} [opts.getStatus] Optional status snapshot for /health
  */
-function startWebhookServer({ bot, onArkezaEvent }) {
+function startWebhookServer({ bot, onArkezaEvent, getStatus }) {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
   // ---- Health ----
   app.get('/health', (_req, res) => {
-    res.json({
+    const base = {
       ok: true,
       service: 'arkeza-bot',
-      uptime: process.uptime(),
+      uptime_seconds: Math.floor(process.uptime()),
       time: new Date().toISOString(),
-    });
+    };
+    let extra = {};
+    try {
+      if (getStatus) extra = getStatus() || {};
+    } catch (e) {
+      extra = { status_error: e.message };
+    }
+    res.json({ ...base, ...extra });
   });
 
   // ---- Telegram updates ----

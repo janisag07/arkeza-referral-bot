@@ -200,6 +200,24 @@ bot.command('start', async (ctx) => {
   }
 });
 
+// ---- /link <token>  (manual alias for the deep-link flow) ----
+//
+// The Arkeza app's primary linking path is the deep-link `?start=<JWT>`,
+// which our /start handler covers. But users who paste their token manually
+// (or were instructed by older docs to use `/link <token>`) should also
+// succeed instead of getting "unknown command" silence.
+
+bot.command('link', async (ctx) => {
+  const arg = (ctx.match || '').trim();
+  if (!arg) {
+    await ctx.reply(
+      '❌ Usage: /link <your_token>\n\nGet your link token from the Arkeza app.'
+    );
+    return;
+  }
+  await handleLinkToken(ctx, arg);
+});
+
 // ---- /profile (Arkeza app data) ----
 
 bot.command('profile', async (ctx) => {
@@ -535,13 +553,18 @@ async function handleArkezaEvent(payload) {
 // ---- Shutdown handlers ----
 
 let serverRef = null;
+let runtimeMode = 'unknown'; // 'webhook' | 'polling' | 'unknown'
 
 async function shutdown(signal) {
   console.log(`\n🛑 Received ${signal}, shutting down...`);
   try {
-    await bot.api.deleteWebhook({ drop_pending_updates: false });
+    if (runtimeMode === 'webhook') {
+      await bot.api.deleteWebhook({ drop_pending_updates: false });
+    } else if (runtimeMode === 'polling') {
+      await bot.stop();
+    }
   } catch (e) {
-    /* ignore */
+    /* ignore — best effort */
   }
   if (serverRef) serverRef.close();
   db.close();
@@ -552,33 +575,68 @@ process.once('SIGINT', () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));
 
 // ---- Boot ----
+//
+// Mode selection:
+//   - WEBHOOK_BASE_URL set + reachable HTTPS → Webhook mode (preferred)
+//   - WEBHOOK_BASE_URL empty/unset → Long-polling fallback (works without HTTPS)
+//
+// In both modes:
+//   - We always start the Express server (so /webhook/arkeza milestone events
+//     keep working from Mit's backend regardless of which Telegram-update
+//     transport we use).
+//   - We always call deleteWebhook(drop_pending_updates: true) before polling
+//     to clear any stale webhook that would otherwise siphon off updates.
+
+async function selfCheckArkezaApi() {
+  // Quick reachability ping to Mit's API — does NOT validate auth, just DNS+TCP+TLS.
+  const r = await arkezaApi.isLinked('0');
+  if (r.ok || r.status === 200 || (r.status >= 200 && r.status < 500)) {
+    return { ok: true, detail: `HTTP ${r.status || 200}` };
+  }
+  return { ok: false, detail: r.message || `HTTP ${r.status}` };
+}
 
 async function main() {
-  console.log('🚀 Arkeza Referral Bot starting (M4: webhook mode)...');
+  const mode = WEBHOOK_BASE_URL ? 'webhook' : 'polling';
+  console.log('================================================');
+  console.log(`🚀 Arkeza Referral Bot starting (mode: ${mode.toUpperCase()})`);
+  console.log('================================================');
 
   // Initialize bot so bot.api.* is usable.
   await bot.init();
-  console.log(`✅ Bot @${bot.botInfo.username} initialized`);
-  console.log(`📊 Admin IDs: ${ADMIN_IDS.join(', ') || 'None configured'}`);
-  console.log(`⚙️  Rate limit: ${RATE_LIMIT_MAX_JOINS} joins / ${RATE_LIMIT_WINDOW_HOURS}h`);
-  console.log(`🌍 Group: ${GROUP_LINK}`);
-  console.log(`🔌 Arkeza API: ${arkezaApi._config.BASE_URL} (auth: ${arkezaApi._config.hasApiKey ? 'yes' : 'no'})`);
+  console.log(`✅ Telegram identity:    @${bot.botInfo.username} (id ${bot.botInfo.id})`);
+  console.log(`✅ Admins configured:    ${ADMIN_IDS.length ? ADMIN_IDS.join(', ') : 'NONE'}`);
+  console.log(`✅ Group link:           ${GROUP_LINK}`);
+  console.log(`✅ Announcement channel: ${ANNOUNCEMENT_CHANNEL_ID || 'NOT SET (events will only log)'}`);
+  console.log(`✅ Arkeza API base:      ${arkezaApi._config.BASE_URL}`);
+  console.log(`✅ Arkeza API auth:      ${arkezaApi._config.hasApiKey ? 'Bearer token configured' : 'unauthenticated'}`);
 
-  // Start express + register routes BEFORE setting webhook so Telegram never
-  // hits a 404 between setWebhook and the listener becoming ready.
+  // API self-check — non-fatal, but tells Patrick at boot if DNS/TLS/firewall is OK.
+  try {
+    const apiCheck = await selfCheckArkezaApi();
+    console.log(
+      `${apiCheck.ok ? '✅' : '❌'} Arkeza API reachable: ${apiCheck.detail}`
+    );
+  } catch (e) {
+    console.log(`❌ Arkeza API reachable: ${e.message}`);
+  }
+
+  // Express server (always on — handles inbound Arkeza webhooks regardless of TG mode).
   serverRef = await startWebhookServer({
     bot,
     onArkezaEvent: handleArkezaEvent,
+    getStatus: () => ({
+      mode: runtimeMode,
+      bot_username: bot.botInfo?.username || null,
+      arkeza_api_base: arkezaApi._config.BASE_URL,
+      arkeza_api_authenticated: arkezaApi._config.hasApiKey,
+      announcement_channel_configured: !!ANNOUNCEMENT_CHANNEL_ID,
+      admin_count: ADMIN_IDS.length,
+    }),
   });
 
-  // Register webhook with Telegram. This automatically drops any existing
-  // long-polling session — fixes the 409 Conflict.
-  if (!WEBHOOK_BASE_URL) {
-    console.warn(
-      '⚠️  WEBHOOK_BASE_URL not set — running server without registering Telegram webhook.\n' +
-        '   Set WEBHOOK_BASE_URL=https://your-public-host in .env to receive updates.'
-    );
-  } else {
+  // ---- Telegram update transport ----
+  if (mode === 'webhook') {
     const fullUrl = `${WEBHOOK_BASE_URL.replace(/\/$/, '')}${paths.telegram}`;
     try {
       await bot.api.setWebhook(fullUrl, {
@@ -586,21 +644,57 @@ async function main() {
         drop_pending_updates: true,
         allowed_updates: ['message', 'callback_query', 'my_chat_member'],
       });
+      runtimeMode = 'webhook';
       console.log(`✅ Telegram webhook registered: ${fullUrl}`);
     } catch (err) {
-      console.error('❌ Failed to set Telegram webhook:', err.message);
+      console.error(`❌ Failed to set Telegram webhook: ${err.message}`);
       if (/HTTPS|https/.test(err.message)) {
         console.error(
-          '   → Telegram requires HTTPS for webhooks. Put nginx + Let\'s Encrypt'
+          "   → Telegram requires HTTPS for webhooks. Either put nginx + Let's Encrypt"
         );
-        console.error(
-          '     (or a Cloudflare Tunnel) in front of the server, then update'
-        );
-        console.error('     WEBHOOK_BASE_URL=https://<your-domain> in .env.');
+        console.error('     (or Cloudflare Tunnel) in front of the server and update');
+        console.error('     WEBHOOK_BASE_URL=https://<your-domain> in .env, or simply');
+        console.error('     leave WEBHOOK_BASE_URL empty to fall back to long-polling.');
       }
-      console.error('   The bot will not receive updates until this is fixed.');
+      console.error('⚠️  Falling back to long-polling so the bot still works...');
+      await startPolling();
     }
+  } else {
+    console.log('ℹ️  WEBHOOK_BASE_URL not set → using long-polling mode.');
+    console.log('   (For production, configure HTTPS + WEBHOOK_BASE_URL to use webhooks.)');
+    await startPolling();
   }
+
+  console.log('================================================');
+  console.log('🟢 Bot is now LIVE and listening for updates.');
+  console.log('================================================');
+}
+
+async function startPolling() {
+  // Critical: clear any previously-registered webhook AND any pending updates,
+  // otherwise getUpdates returns 409 Conflict because Telegram won't deliver
+  // long-polling responses while a webhook is set.
+  try {
+    await bot.api.deleteWebhook({ drop_pending_updates: true });
+    console.log('✅ Cleared stale webhook + pending updates (anti-409 protection).');
+  } catch (err) {
+    console.warn(`⚠️  deleteWebhook failed (continuing anyway): ${err.message}`);
+  }
+
+  // bot.start() is async-loop; it never resolves. Don't await it.
+  bot
+    .start({
+      drop_pending_updates: true,
+      allowed_updates: ['message', 'callback_query', 'my_chat_member'],
+      onStart: () => {
+        runtimeMode = 'polling';
+        console.log('✅ Long-polling started.');
+      },
+    })
+    .catch((err) => {
+      console.error('💥 Polling crashed:', err.message);
+      process.exit(1);
+    });
 }
 
 main().catch((err) => {
