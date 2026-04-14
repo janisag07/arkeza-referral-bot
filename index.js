@@ -200,6 +200,24 @@ bot.command('start', async (ctx) => {
   }
 });
 
+// ---- /link <token>  (manual alias for the deep-link flow) ----
+//
+// The Arkeza app's primary linking path is the deep-link `?start=<JWT>`,
+// which our /start handler covers. But users who paste their token manually
+// (or were instructed by older docs to use `/link <token>`) should also
+// succeed instead of getting "unknown command" silence.
+
+bot.command('link', async (ctx) => {
+  const arg = (ctx.match || '').trim();
+  if (!arg) {
+    await ctx.reply(
+      '❌ Usage: /link <your_token>\n\nGet your link token from the Arkeza app.'
+    );
+    return;
+  }
+  await handleLinkToken(ctx, arg);
+});
+
 // ---- /profile (Arkeza app data) ----
 
 bot.command('profile', async (ctx) => {
