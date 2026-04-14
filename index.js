@@ -363,6 +363,18 @@ bot.command('profile', async (ctx) => {
       await ctx.reply('❌ You are not linked yet. Open the link from the Arkeza app first.');
       return;
     }
+    // API unreachable → fall back to in-bot referral stats if user is registered.
+    const localUser = db.getUser(telegramId);
+    if (localUser) {
+      const stats = db.getReferralStats(telegramId);
+      await ctx.reply(
+        `👤 Your In-Bot Profile\n\n` +
+          `(Arkeza app data temporarily unavailable)\n\n` +
+          `✅ Verified Referrals: ${stats.verified_referrals}\n` +
+          `👥 Total Referrals: ${stats.total_referrals}`
+      );
+      return;
+    }
     await ctx.reply(`❌ Could not fetch profile: ${result.message}`);
     return;
   }
@@ -381,12 +393,47 @@ bot.command('profile', async (ctx) => {
 // Defaults to legacy bot leaderboard if no Arkeza data available; otherwise
 // shows XP top users with a switch button to Referral leaderboard.
 
+// ---- /leaderboard ----
+//
+// Primary: XP + Referral from Arkeza API (when encryption configured).
+// Fallback: in-bot referral leaderboard from SQLite — so the community
+// leaderboard keeps working even while Arkeza integration is being set up.
+
+async function renderInBotLeaderboard(ctx, note = '') {
+  const leaderboard = db.getLeaderboard(10);
+  if (leaderboard.length === 0) {
+    await ctx.reply(
+      '📊 No referrals yet — be the first!' + (note ? `\n\n${note}` : '')
+    );
+    return;
+  }
+  const medals = ['🥇', '🥈', '🥉'];
+  let message = '🏆 Group Referral Leaderboard 🏆\n\n';
+  leaderboard.forEach((u, i) => {
+    const rank = i + 1;
+    const medal = medals[i] || `${rank}.`;
+    const name = u.username
+      ? `@${u.username}`
+      : u.first_name || `User ${u.user_id}`;
+    message += `${medal} ${name}: ${u.verified_referrals} referrals\n`;
+  });
+  if (note) message += `\n${note}`;
+  await ctx.reply(message);
+}
+
 async function renderArkezaLeaderboard(ctx, type) {
   const telegramId = ctx.from.id;
   const result = await arkezaApi.getLeaderboard(telegramId, type);
 
   if (!result.ok) {
-    await ctx.reply(`❌ Could not fetch ${type} leaderboard: ${result.message}`);
+    // Arkeza API unreachable / encryption not configured yet → graceful
+    // fallback to in-bot referral leaderboard so the community still
+    // sees something useful instead of an error.
+    console.warn(`[leaderboard] Arkeza API failed (${result.message}), falling back to in-bot leaderboard`);
+    await renderInBotLeaderboard(
+      ctx,
+      `ℹ️ Arkeza app leaderboard temporarily unavailable; showing in-bot referrals.`
+    );
     return;
   }
 
