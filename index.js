@@ -108,9 +108,11 @@ bot.command('start', async (ctx) => {
   const firstName = ctx.from.first_name;
   const arg = (ctx.match || '').trim();
 
-  console.log(`[start] from ${userId} (@${username}) arg.len=${arg.length}`);
-
   const token = classifyStartToken(arg);
+  console.log(
+    `[start] from ${userId} (@${username}) arg.len=${arg.length} ` +
+      `head="${arg.slice(0, 12)}" type=${token.type}`
+  );
 
   // Arkeza linking flows take priority over the legacy referral display.
   if (token.type === 'link') {
@@ -476,12 +478,15 @@ async function handleArkezaEvent(payload) {
 
   const ev = payload.event;
 
-  // Admin announcement → broadcast to channel
+  // Admin announcement → broadcast to channel.
+  // NOTE: parse_mode intentionally OMITTED — usernames / messages from the
+  // app may contain raw `_`, `*`, `[`, etc. which crash Telegram's Markdown
+  // parser. See commit 7e8ff74 for the original incident.
   if (ev === 'admin_announcement') {
-    const text = `📣 *Announcement*\n\n${payload.message || ''}`;
+    const text = `📣 Announcement\n\n${payload.message || ''}`;
     if (ANNOUNCEMENT_CHANNEL_ID) {
       try {
-        await bot.api.sendMessage(ANNOUNCEMENT_CHANNEL_ID, text, { parse_mode: 'Markdown' });
+        await bot.api.sendMessage(ANNOUNCEMENT_CHANNEL_ID, text);
       } catch (err) {
         console.error('[arkeza-event] failed to post announcement:', err.message);
       }
@@ -584,6 +589,15 @@ async function main() {
       console.log(`✅ Telegram webhook registered: ${fullUrl}`);
     } catch (err) {
       console.error('❌ Failed to set Telegram webhook:', err.message);
+      if (/HTTPS|https/.test(err.message)) {
+        console.error(
+          '   → Telegram requires HTTPS for webhooks. Put nginx + Let\'s Encrypt'
+        );
+        console.error(
+          '     (or a Cloudflare Tunnel) in front of the server, then update'
+        );
+        console.error('     WEBHOOK_BASE_URL=https://<your-domain> in .env.');
+      }
       console.error('   The bot will not receive updates until this is fixed.');
     }
   }
