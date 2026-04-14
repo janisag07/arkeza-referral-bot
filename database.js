@@ -37,11 +37,54 @@ class ReferralDatabase {
         FOREIGN KEY (user_id) REFERENCES users(user_id)
       );
 
+      -- M4: cache of users linked to an Arkeza account via /link-user
+      CREATE TABLE IF NOT EXISTS linked_users (
+        telegram_id INTEGER PRIMARY KEY,
+        arkeza_username TEXT,
+        linked_at INTEGER NOT NULL,
+        last_synced_at INTEGER
+      );
+
       CREATE INDEX IF NOT EXISTS idx_referred_by ON users(referred_by);
       CREATE INDEX IF NOT EXISTS idx_verified ON users(is_verified);
       CREATE INDEX IF NOT EXISTS idx_suspicious ON users(is_suspicious);
       CREATE INDEX IF NOT EXISTS idx_join_timestamp ON join_events(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_linked_at ON linked_users(linked_at);
     `);
+  }
+
+  // ---- M4: Linked-user cache ----
+
+  /**
+   * Record (or refresh) the link between a Telegram ID and an Arkeza account.
+   * Used after a successful /link-user call.
+   */
+  upsertLinkedUser(telegramId, arkezaUsername) {
+    const now = Math.floor(Date.now() / 1000);
+    this.db.prepare(`
+      INSERT INTO linked_users (telegram_id, arkeza_username, linked_at, last_synced_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(telegram_id) DO UPDATE SET
+        arkeza_username = excluded.arkeza_username,
+        last_synced_at = excluded.last_synced_at
+    `).run(telegramId, arkezaUsername || null, now, now);
+  }
+
+  getLinkedUser(telegramId) {
+    return this.db.prepare('SELECT * FROM linked_users WHERE telegram_id = ?').get(telegramId);
+  }
+
+  /**
+   * Reverse lookup: find the Telegram ID that received public milestone events
+   * for a given Arkeza username (used as a fallback when an inbound webhook
+   * does not include telegramId).
+   */
+  getLinkedTelegramIdByUsername(arkezaUsername) {
+    if (!arkezaUsername) return null;
+    const row = this.db.prepare(
+      'SELECT telegram_id FROM linked_users WHERE arkeza_username = ? LIMIT 1'
+    ).get(arkezaUsername);
+    return row?.telegram_id || null;
   }
 
   addUser(userId, username, firstName, referredBy = null, accountCreatedAt = null) {
