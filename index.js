@@ -37,6 +37,12 @@ const APP_ANDROID_URL = process.env.APP_ANDROID_URL || 'https://play.google.com/
 const APP_IOS_URL = process.env.APP_IOS_URL || 'https://apps.apple.com/us/app/arkeza/id6757733204';
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS || 'Token Launch Upcoming — Stay tuned!';
 
+// ---- Auto-delete bot messages in groups ----
+// Matches the old bot's behavior ("Auto-deleting bot message X (from bot: true)")
+// which kept the community group clean. DMs stay (users want their history there).
+const AUTO_DELETE_BOT_MESSAGES = (process.env.AUTO_DELETE_BOT_MESSAGES || 'true').toLowerCase() === 'true';
+const AUTO_DELETE_SECONDS = parseInt(process.env.AUTO_DELETE_SECONDS || '60', 10);
+
 if (!BOT_TOKEN) {
   console.error('❌ BOT_TOKEN not found in .env file');
   process.exit(1);
@@ -44,6 +50,40 @@ if (!BOT_TOKEN) {
 
 const bot = new Bot(BOT_TOKEN);
 const db = new ReferralDatabase();
+
+// ---- Auto-delete middleware for group messages ----
+// In groups/supergroups, wrap ctx.reply so every bot response is
+// scheduled for deletion after AUTO_DELETE_SECONDS. In DMs, replies
+// stay (personal history). Opt-out per-call by passing
+// { autoDelete: false } or { autoDelete: <seconds> } in the reply
+// options.
+bot.use(async (ctx, next) => {
+  if (
+    AUTO_DELETE_BOT_MESSAGES &&
+    (ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup')
+  ) {
+    const originalReply = ctx.reply.bind(ctx);
+    ctx.reply = async (text, options = {}) => {
+      const { autoDelete, ...rest } = options || {};
+      const msg = await originalReply(text, rest);
+      const delaySec =
+        autoDelete === false
+          ? 0
+          : typeof autoDelete === 'number'
+          ? autoDelete
+          : AUTO_DELETE_SECONDS;
+      if (delaySec > 0) {
+        setTimeout(async () => {
+          try {
+            await ctx.api.deleteMessage(msg.chat.id, msg.message_id);
+          } catch (_) { /* may already be deleted */ }
+        }, delaySec * 1000);
+      }
+      return msg;
+    };
+  }
+  await next();
+});
 
 const isAdmin = (userId) => ADMIN_IDS.includes(userId);
 
