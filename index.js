@@ -336,6 +336,7 @@ bot.command('help', async (ctx) => {
     `🤖 Arkeza Bot — Commands\n\n` +
       `/start            — Link your Arkeza account (via deep-link) or view your stats\n` +
       `/link <token>     — Manual alternative to the deep-link\n` +
+      `/connect          — Start the linking flow (for members already in the group)\n` +
       `/profile          — Your Arkeza profile (XP, referrals)\n` +
       `/leaderboard      — XP + Referral leaderboards\n` +
       `/stats            — Your in-bot referral stats\n` +
@@ -585,6 +586,30 @@ bot.command('stats', async (ctx) => {
       `All-time total: ${stats.total_referrals}\n\n` +
       `🔗 Your Referral Link:\n${referralLink}\n\n` +
       `Share this link to climb the leaderboard!`
+  );
+});
+
+// ---- /connect ----
+//
+// For users already in the group who want to link their Arkeza account
+// without relying on the welcome-on-join message. Posts a short guide
+// with buttons to the Arkeza app (so they can grab a fresh deep-link)
+// and to the bot itself.
+
+bot.command('connect', async (ctx) => {
+  const botLink = `https://t.me/${BOT_USERNAME}`;
+  const kb = new InlineKeyboard()
+    .url('📱 Open Arkeza (Android)', APP_ANDROID_URL)
+    .url('📱 Open Arkeza (iOS)', APP_IOS_URL)
+    .row()
+    .url('🚀 Open Bot', botLink);
+  await ctx.reply(
+    `🔗 Link your Telegram to Arkeza\n\n` +
+      `1. Open the Arkeza app and tap "Connect Telegram"\n` +
+      `2. Follow the deep-link it gives you — the bot will pick it up\n` +
+      `3. Or paste the token manually with /link <token>\n\n` +
+      `Buttons below for the app + bot.`,
+    { reply_markup: kb }
   );
 });
 
