@@ -603,6 +603,7 @@ bot.command('admin', async (ctx) => {
       '🔧 Admin Commands\n\n' +
         '/admin cycle - Start a NEW leaderboard cycle (rotates the board)\n' +
         '/admin cycles - List past cycles\n' +
+        '/admin winners - Announce current cycle\'s 1st + 2nd place\n' +
         '/admin stats - Overall statistics\n' +
         '/admin suspicious - List suspicious users\n' +
         '/admin remove <user_id> - Remove a user\n' +
@@ -612,6 +613,28 @@ bot.command('admin', async (ctx) => {
   }
 
   switch (command) {
+    case 'winners': {
+      const cycleStart = db.getCurrentCycleStart();
+      const topN = db.getCycleLeaderboard(cycleStart, 2);
+      if (topN.length === 0) {
+        await ctx.reply(
+          '📊 No verified referrals this cycle yet — nothing to announce.'
+        );
+        break;
+      }
+      const nameOf = (u) =>
+        u.username ? `@${u.username}` : u.first_name || `User ${u.user_id}`;
+      const [first, second] = topN;
+      let msg = `🏆 Cycle Winners 🏆\n\n`;
+      msg += `🥇 ${nameOf(first)} — ${first.verified_referrals} verified referrals\n`;
+      if (second) {
+        msg += `🥈 ${nameOf(second)} — ${second.verified_referrals} verified referrals\n`;
+      }
+      msg += `\nCongratulations! 🎉`;
+      // autoDelete: false → announcement stays in chat history.
+      await ctx.reply(msg, { autoDelete: false });
+      break;
+    }
     case 'cycle': {
       const startedAt = db.startNewCycle(ctx.from.id, args[1] || null);
       const iso = new Date(startedAt * 1000).toISOString();
