@@ -47,6 +47,16 @@ class ReferralDatabase {
         last_synced_at INTEGER
       );
 
+      -- Campaign cycle window: manually rotated by admins via "/admin cycle".
+      -- The 'current' row (id=1) holds the open cycle's start timestamp.
+      -- Past cycles are archived rows with started_at < current.
+      CREATE TABLE IF NOT EXISTS campaign_cycles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        started_at INTEGER NOT NULL,
+        started_by INTEGER,
+        label TEXT
+      );
+
       CREATE INDEX IF NOT EXISTS idx_referred_by ON users(referred_by);
       CREATE INDEX IF NOT EXISTS idx_verified ON users(is_verified);
       CREATE INDEX IF NOT EXISTS idx_suspicious ON users(is_suspicious);
@@ -275,12 +285,52 @@ class ReferralDatabase {
     `).all(limit);
   }
 
+  // ---- Campaign cycles (admin-controlled via /admin cycle) ----
+
   /**
-   * Weekly leaderboard — only counts referrals verified within [windowStart, windowEnd).
-   * Patrick's referral campaign rotates weekly; this query groups verified users
-   * (verified_at in the current window) by their referrer.
+   * Return the start timestamp (unix) of the currently active cycle.
+   * Creates a first cycle on the fly if none exists yet (bot first run).
    */
-  getWeeklyLeaderboard(windowStartUnix, windowEndUnix, limit = 10) {
+  getCurrentCycleStart() {
+    const row = this.db
+      .prepare('SELECT started_at FROM campaign_cycles ORDER BY started_at DESC LIMIT 1')
+      .get();
+    if (row) return row.started_at;
+    // No cycle exists yet — create an initial one from "now".
+    return this.startNewCycle(null, 'initial');
+  }
+
+  /**
+   * Begin a new cycle: inserts a new row with started_at = now.
+   * All future leaderboard queries filter verified_at >= that timestamp.
+   *
+   * @param {number|null} adminUserId  Who triggered the rotation (for audit)
+   * @param {string|null} label        Optional human-readable label
+   * @returns the new started_at unix timestamp
+   */
+  startNewCycle(adminUserId = null, label = null) {
+    const now = Math.floor(Date.now() / 1000);
+    this.db
+      .prepare('INSERT INTO campaign_cycles (started_at, started_by, label) VALUES (?, ?, ?)')
+      .run(now, adminUserId, label);
+    return now;
+  }
+
+  /**
+   * Past cycles (newest first), for history / admin display.
+   */
+  listCycles(limit = 10) {
+    return this.db
+      .prepare('SELECT * FROM campaign_cycles ORDER BY started_at DESC LIMIT ?')
+      .all(limit);
+  }
+
+  /**
+   * Cycle leaderboard — only counts referrals verified AT OR AFTER cycleStart.
+   * Patrick's campaign rotates on explicit admin command; this query groups
+   * verified users (verified_at >= cycleStart) by their referrer.
+   */
+  getCycleLeaderboard(cycleStartUnix, limit = 10) {
     return this.db.prepare(`
       SELECT
         r.user_id,
@@ -292,18 +342,17 @@ class ReferralDatabase {
       WHERE v.is_verified = 1
         AND v.verified_at IS NOT NULL
         AND v.verified_at >= ?
-        AND v.verified_at < ?
       GROUP BY r.user_id, r.username, r.first_name
       ORDER BY verified_referrals DESC, r.joined_at ASC
       LIMIT ?
-    `).all(windowStartUnix, windowEndUnix, limit);
+    `).all(cycleStartUnix, limit);
   }
 
   /**
-   * Personal stats for the current week: how many referrals did `userId`
-   * get verified in [windowStartUnix, windowEndUnix)?
+   * Personal stats for the current cycle: how many referrals did `userId`
+   * get verified since cycleStart?
    */
-  getWeeklyReferralCount(userId, windowStartUnix, windowEndUnix) {
+  getCycleReferralCount(userId, cycleStartUnix) {
     const row = this.db
       .prepare(`
         SELECT COUNT(*) as count FROM users
@@ -311,9 +360,8 @@ class ReferralDatabase {
           AND is_verified = 1
           AND verified_at IS NOT NULL
           AND verified_at >= ?
-          AND verified_at < ?
       `)
-      .get(userId, windowStartUnix, windowEndUnix);
+      .get(userId, cycleStartUnix);
     return row?.count || 0;
   }
 

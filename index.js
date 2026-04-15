@@ -429,31 +429,8 @@ bot.command('profile', async (ctx) => {
 
 // ---- /leaderboard ----
 //
-// Primary: XP + Referral from Arkeza API (when encryption configured).
-// Fallback: in-bot referral leaderboard from SQLite — so the community
-// leaderboard keeps working even while Arkeza integration is being set up.
-
-async function renderInBotLeaderboard(ctx, note = '') {
-  const leaderboard = db.getLeaderboard(10);
-  if (leaderboard.length === 0) {
-    await ctx.reply(
-      '📊 No referrals yet — be the first!' + (note ? `\n\n${note}` : '')
-    );
-    return;
-  }
-  const medals = ['🥇', '🥈', '🥉'];
-  let message = '🏆 Group Referral Leaderboard 🏆\n\n';
-  leaderboard.forEach((u, i) => {
-    const rank = i + 1;
-    const medal = medals[i] || `${rank}.`;
-    const name = u.username
-      ? `@${u.username}`
-      : u.first_name || `User ${u.user_id}`;
-    message += `${medal} ${name}: ${u.verified_referrals} referrals\n`;
-  });
-  if (note) message += `\n${note}`;
-  await ctx.reply(message);
-}
+// Primary: cycle-scoped group referral leaderboard (Patrick's campaign).
+// Secondary (via inline button): Arkeza app XP / Referrals leaderboard.
 
 async function renderArkezaLeaderboard(ctx, type) {
   const telegramId = ctx.from.id;
@@ -501,49 +478,27 @@ async function renderArkezaLeaderboard(ctx, type) {
   await ctx.reply(message, { reply_markup: kb });
 }
 
-// ---- Weekly window helpers ----
+// ---- Campaign cycle ----
 //
-// Patrick's referral campaign rotates weekly. The week starts on
-// WEEK_START_DAY (default Monday) at WEEK_START_HOUR:00 UTC (default 00 UTC).
-// Both tunable via env so admins can reset the cycle if needed.
-const WEEK_START_DAY = parseInt(process.env.WEEK_START_DAY || '1', 10); // 0=Sun, 1=Mon, ..., 6=Sat
-const WEEK_START_HOUR = parseInt(process.env.WEEK_START_HOUR || '0', 10);
+// Per Patrick's spec, the leaderboard does NOT auto-rotate on a weekly
+// schedule. Admins explicitly start a new cycle via `/admin cycle`.
+// Only referrals verified at or after the current cycle's started_at
+// timestamp count toward the current leaderboard.
 
-function getCurrentWeekWindow() {
-  const now = new Date();
-  // Walk back to the most recent WEEK_START_DAY at WEEK_START_HOUR UTC.
-  const start = new Date(Date.UTC(
-    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
-    WEEK_START_HOUR, 0, 0, 0
-  ));
-  while (start.getUTCDay() !== WEEK_START_DAY || start > now) {
-    start.setUTCDate(start.getUTCDate() - 1);
-  }
-  const end = new Date(start.getTime() + 7 * 24 * 3600 * 1000);
-  return {
-    startUnix: Math.floor(start.getTime() / 1000),
-    endUnix: Math.floor(end.getTime() / 1000),
-    startIso: start.toISOString(),
-    endIso: end.toISOString(),
-  };
-}
-
-function formatWeeklyBoardHeader() {
-  const w = getCurrentWeekWindow();
-  const startStr = w.startIso.slice(0, 10);
-  const endDay = new Date(w.endUnix * 1000 - 1);
-  const endStr = endDay.toISOString().slice(0, 10);
-  return `📅 Week of ${startStr} → ${endStr}`;
+function formatCycleHeader() {
+  const startUnix = db.getCurrentCycleStart();
+  const startIso = new Date(startUnix * 1000).toISOString();
+  return `📅 Cycle since ${startIso.slice(0, 16).replace('T', ' ')} UTC`;
 }
 
 // ---- /leaderboard ----
-// Default = this week's group referrals (Patrick's campaign).
-// Toggle buttons switch to Arkeza XP / Referrals if encryption is live.
+// Default = current cycle's group referrals (Patrick's campaign).
+// Toggle buttons switch to Arkeza XP / Referrals.
 
-async function renderWeeklyGroupLeaderboard(ctx) {
-  const w = getCurrentWeekWindow();
-  const rows = db.getWeeklyLeaderboard(w.startUnix, w.endUnix, 10);
-  const header = formatWeeklyBoardHeader();
+async function renderCycleGroupLeaderboard(ctx) {
+  const cycleStart = db.getCurrentCycleStart();
+  const rows = db.getCycleLeaderboard(cycleStart, 10);
+  const header = formatCycleHeader();
 
   const kb = new InlineKeyboard()
     .text('🔁 XP', 'show_leaderboard_xp')
@@ -552,12 +507,12 @@ async function renderWeeklyGroupLeaderboard(ctx) {
   if (rows.length === 0) {
     await ctx.reply(
       `🏆 Group Referral Leaderboard 🏆\n${header}\n\n` +
-        `No verified referrals yet this week — be the first!\n\n` +
+        `No verified referrals yet this cycle — be the first!\n\n` +
         `Share your referral link and invite friends. They need to:\n` +
         `  1. Join the group via your link\n` +
-        `  2. Send a message to confirm\n` +
-        `  3. Stay active: 3 messages after a 24h cool-down\n` +
-        `Then the referral counts toward this week's leaderboard.`,
+        `  2. Send a message to confirm (Pending)\n` +
+        `  3. Stay active: 3 messages after a 24h cool-down → Verified\n` +
+        `Only Verified referrals count toward the current cycle.`,
       { reply_markup: kb }
     );
     return;
@@ -571,19 +526,19 @@ async function renderWeeklyGroupLeaderboard(ctx) {
     message += `${medal} ${name}: ${u.verified_referrals} verified refs\n`;
   });
 
-  const myCount = db.getWeeklyReferralCount(ctx.from.id, w.startUnix, w.endUnix);
-  message += `\n— Your week: ${myCount} verified referral${myCount === 1 ? '' : 's'}`;
+  const myCount = db.getCycleReferralCount(ctx.from.id, cycleStart);
+  message += `\n— Your cycle: ${myCount} verified referral${myCount === 1 ? '' : 's'}`;
 
   await ctx.reply(message, { reply_markup: kb });
 }
 
 bot.command('leaderboard', async (ctx) => {
-  await renderWeeklyGroupLeaderboard(ctx);
+  await renderCycleGroupLeaderboard(ctx);
 });
 
 bot.callbackQuery('show_leaderboard_group', async (ctx) => {
   await ctx.answerCallbackQuery();
-  await renderWeeklyGroupLeaderboard(ctx);
+  await renderCycleGroupLeaderboard(ctx);
 });
 
 bot.callbackQuery('show_leaderboard_xp', async (ctx) => {
@@ -621,15 +576,15 @@ bot.command('stats', async (ctx) => {
   }
   const stats = db.getReferralStats(userId);
   const referralLink = getReferralLink(userId);
-  const w = getCurrentWeekWindow();
-  const weeklyVerified = db.getWeeklyReferralCount(userId, w.startUnix, w.endUnix);
+  const cycleStart = db.getCurrentCycleStart();
+  const cycleVerified = db.getCycleReferralCount(userId, cycleStart);
   await ctx.reply(
     `📊 Your Referral Stats\n\n` +
-      `This week: ${weeklyVerified} verified\n` +
+      `This cycle: ${cycleVerified} verified\n` +
       `All-time verified: ${stats.verified_referrals}\n` +
       `All-time total: ${stats.total_referrals}\n\n` +
       `🔗 Your Referral Link:\n${referralLink}\n\n` +
-      `Share this link to climb this week's leaderboard!`
+      `Share this link to climb the leaderboard!`
   );
 });
 
@@ -646,6 +601,8 @@ bot.command('admin', async (ctx) => {
   if (!command) {
     await ctx.reply(
       '🔧 Admin Commands\n\n' +
+        '/admin cycle - Start a NEW leaderboard cycle (rotates the board)\n' +
+        '/admin cycles - List past cycles\n' +
         '/admin stats - Overall statistics\n' +
         '/admin suspicious - List suspicious users\n' +
         '/admin remove <user_id> - Remove a user\n' +
@@ -655,6 +612,32 @@ bot.command('admin', async (ctx) => {
   }
 
   switch (command) {
+    case 'cycle': {
+      const startedAt = db.startNewCycle(ctx.from.id, args[1] || null);
+      const iso = new Date(startedAt * 1000).toISOString();
+      await ctx.reply(
+        `🔄 New leaderboard cycle started.\n\n` +
+          `Start: ${iso.slice(0, 16).replace('T', ' ')} UTC\n` +
+          `Only referrals verified from this moment on will count in the ` +
+          `current board. Past verifications are archived.`
+      );
+      break;
+    }
+    case 'cycles': {
+      const cycles = db.listCycles(10);
+      if (cycles.length === 0) {
+        await ctx.reply('No cycles recorded yet.');
+        break;
+      }
+      let msg = '📅 Recent cycles (newest first):\n\n';
+      cycles.forEach((c, i) => {
+        const iso = new Date(c.started_at * 1000).toISOString().slice(0, 16).replace('T', ' ');
+        msg += `${i === 0 ? '🟢' : '⚪️'} #${c.id} — ${iso} UTC${c.label ? ` — ${c.label}` : ''}\n`;
+      });
+      msg += '\n🟢 = current open cycle';
+      await ctx.reply(msg);
+      break;
+    }
     case 'stats': {
       const stats = db.getTotalStats();
       await ctx.reply(
