@@ -1,129 +1,94 @@
 /**
- * Arkeza API encryption layer.
+ * Arkeza API encryption — RSA-OAEP-SHA256 per official docs.
  *
- * The V1 spec says "Plain JSON" but the live API actually rejects plain
- * requests with HTTP 400 "Missing encryption data". The task brief said
- * RSA-OAEP-SHA256 was the algorithm used in the previous working
- * implementation. Since RSA-2048-OAEP can only encrypt payloads up to
- * ~190 bytes, full request bodies are hybrid-encrypted: a random AES-256
- * key encrypts the JSON, and that key is in turn RSA-encrypted with
- * Arkeza's public key.
+ * Per the V1 docs (Security & Encryption section):
+ *   - Algorithm: RSA-OAEP with SHA-256
+ *   - Envelope:  { "data": "<base64 of ciphertext>" }
+ *   - The plaintext JSON is encrypted directly with the server's public key
+ *     (no hybrid AES wrapping). Payload must fit in a single RSA block:
+ *       - RSA-2048 → ~190 bytes after OAEP-SHA256 padding
+ *       - RSA-4096 → ~446 bytes after OAEP-SHA256 padding
  *
- * This module is a drop-in helper. Toggle via env:
+ * Public-key delivery:
+ *   - Default path:      ./keys/tg-public.pem  (relative to project root)
+ *   - Override path:     ARKEZA_PUBLIC_KEY_FILE=/absolute/path.pem
+ *   - Or inline PEM:     ARKEZA_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n..."
  *
- *   ARKEZA_ENCRYPT=true                       # enable encryption
- *   ARKEZA_PUBLIC_KEY_FILE=/path/tg-public.pem   # or inline:
- *   ARKEZA_PUBLIC_KEY=-----BEGIN PUBLIC KEY----- ...
- *   ARKEZA_ENCRYPTION_MODE=hybrid             # hybrid|rsa (default hybrid)
- *   ARKEZA_ENVELOPE_FORMAT=standard           # standard|flat (see below)
- *
- * Envelope formats (we guess "standard"; Mit may request different field
- * names — easy to adjust once we have his spec):
- *
- *   standard: { "data": "<base64-aes-ciphertext>",
- *               "key":  "<base64-rsa-encrypted-aes-key>",
- *               "iv":   "<base64-iv>" }
- *
- *   flat:     { "encryptedData": "<base64-concat(iv + key + ciphertext)>" }
- *
- * If Mit's actual format differs, only `buildEnvelope()` needs changing.
+ * Auto-activation:
+ *   Encryption turns ON automatically once a public key is readable. Set
+ *   ARKEZA_ENCRYPT=false to force-disable it for debugging (returns plain
+ *   JSON, which the API will reject — only useful to confirm the wire).
  */
 
 const crypto = require('crypto');
 const fs = require('fs');
+const path = require('path');
 
-const ENCRYPT = (process.env.ARKEZA_ENCRYPT || 'false').toLowerCase() === 'true';
-const MODE = (process.env.ARKEZA_ENCRYPTION_MODE || 'hybrid').toLowerCase();
-const ENVELOPE_FORMAT = (process.env.ARKEZA_ENVELOPE_FORMAT || 'standard').toLowerCase();
+const FORCE_DISABLED = (process.env.ARKEZA_ENCRYPT || '').toLowerCase() === 'false';
+const DEFAULT_KEY_PATH = path.resolve(__dirname, 'keys', 'tg-public.pem');
 
-let publicKeyPem = null;
+let cachedKey = null;
+let keyLoadAttempted = false;
+
 function loadPublicKey() {
-  if (publicKeyPem !== null) return publicKeyPem;
-  const keyFile = process.env.ARKEZA_PUBLIC_KEY_FILE;
-  const keyInline = process.env.ARKEZA_PUBLIC_KEY;
-  if (keyInline && keyInline.includes('-----BEGIN')) {
-    publicKeyPem = keyInline.replace(/\\n/g, '\n');
-  } else if (keyFile && fs.existsSync(keyFile)) {
-    publicKeyPem = fs.readFileSync(keyFile, 'utf8');
-  } else {
-    publicKeyPem = '';
+  if (keyLoadAttempted) return cachedKey;
+  keyLoadAttempted = true;
+
+  const inline = process.env.ARKEZA_PUBLIC_KEY;
+  if (inline && inline.includes('-----BEGIN')) {
+    cachedKey = inline.replace(/\\n/g, '\n');
+    return cachedKey;
   }
-  return publicKeyPem;
+
+  const filePath = process.env.ARKEZA_PUBLIC_KEY_FILE || DEFAULT_KEY_PATH;
+  try {
+    if (fs.existsSync(filePath)) {
+      cachedKey = fs.readFileSync(filePath, 'utf8');
+      return cachedKey;
+    }
+  } catch (_) { /* fall through */ }
+  cachedKey = null;
+  return null;
 }
 
 function isConfigured() {
-  return ENCRYPT && !!loadPublicKey();
+  if (FORCE_DISABLED) return false;
+  return !!loadPublicKey();
 }
 
 /**
- * Encrypt a payload object for the Arkeza API.
- * Returns the envelope the caller should send as the request body,
- * or `null` if encryption is not configured (caller sends plain JSON).
+ * Build the encrypted envelope the API expects.
  *
- * @param {object} payload  Plain JS object, e.g. { telegramId, token }
- * @returns {object|null}   Envelope to send as JSON body
+ * @param {object} payload  Plain JS object, e.g. { telegramId: "..." }
+ * @returns {object}        { data: "<base64 ciphertext>" }
+ * @throws  If the plaintext is too large for the configured RSA key
  */
 function encryptPayload(payload) {
-  if (!isConfigured()) return null;
-  const plaintext = Buffer.from(JSON.stringify(payload), 'utf8');
-
-  if (MODE === 'rsa') {
-    if (plaintext.length > 190) {
-      throw new Error(
-        `Payload too large for pure-RSA mode (${plaintext.length} bytes, max ~190). Use hybrid mode.`
-      );
-    }
-    const encrypted = crypto.publicEncrypt(
-      {
-        key: loadPublicKey(),
-        padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-        oaepHash: 'sha256',
-      },
-      plaintext
+  const key = loadPublicKey();
+  if (!key) {
+    throw new Error(
+      'Arkeza public key not found. Place tg-public.pem at ./keys/tg-public.pem ' +
+        'or set ARKEZA_PUBLIC_KEY / ARKEZA_PUBLIC_KEY_FILE in .env.'
     );
-    return ENVELOPE_FORMAT === 'flat'
-      ? { encryptedData: encrypted.toString('base64') }
-      : { data: encrypted.toString('base64') };
   }
-
-  // Hybrid: AES-256-CBC for the body, RSA-OAEP-SHA256 for the AES key.
-  const aesKey = crypto.randomBytes(32);
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', aesKey, iv);
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-
-  const encryptedKey = crypto.publicEncrypt(
+  const plaintext = Buffer.from(JSON.stringify(payload), 'utf8');
+  const ciphertext = crypto.publicEncrypt(
     {
-      key: loadPublicKey(),
+      key,
       padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
       oaepHash: 'sha256',
     },
-    aesKey
+    plaintext
   );
-
-  if (ENVELOPE_FORMAT === 'flat') {
-    // iv || encryptedKey || ciphertext, all base64
-    const blob = Buffer.concat([iv, encryptedKey, ciphertext]);
-    return { encryptedData: blob.toString('base64') };
-  }
-  return {
-    data: ciphertext.toString('base64'),
-    key: encryptedKey.toString('base64'),
-    iv: iv.toString('base64'),
-  };
+  return { data: ciphertext.toString('base64') };
 }
 
 /**
- * If the API returns encrypted responses, decrypt them here.
- * Placeholder — the current error "Missing encryption data" is about
- * REQUESTS; responses might still be plain. Adjust when Mit clarifies.
- *
- * @param {object} responseBody  Parsed JSON from axios
- * @returns {object}             Decrypted payload (or the body unchanged)
+ * Responses from the API are plain JSON per spec — just pass through.
+ * Exported so callers can uniformly route responses even if we later
+ * need to decrypt.
  */
 function decryptResponse(responseBody) {
-  // If the response is an envelope we recognize AND we have a private key,
-  // decrypt it here. For now we just pass through.
   return responseBody;
 }
 
@@ -132,9 +97,9 @@ module.exports = {
   encryptPayload,
   decryptResponse,
   _config: {
-    enabled: ENCRYPT,
-    mode: MODE,
-    envelopeFormat: ENVELOPE_FORMAT,
-    hasPublicKey: !!loadPublicKey(),
+    get enabled() { return isConfigured(); },
+    get hasPublicKey() { return !!loadPublicKey(); },
+    forceDisabled: FORCE_DISABLED,
+    keyPathAttempted: process.env.ARKEZA_PUBLIC_KEY_FILE || DEFAULT_KEY_PATH,
   },
 };

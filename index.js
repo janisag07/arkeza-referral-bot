@@ -831,6 +831,16 @@ async function main() {
   console.log(`✅ Announcement channel: ${ANNOUNCEMENT_CHANNEL_ID || 'NOT SET (events will only log)'}`);
   console.log(`✅ Arkeza API base:      ${arkezaApi._config.BASE_URL}`);
   console.log(`✅ Arkeza API auth:      ${arkezaApi._config.hasApiKey ? 'Bearer token configured' : 'unauthenticated'}`);
+  const encCfg = arkezaApi._config.encryption;
+  console.log(
+    `${encCfg.enabled ? '✅' : '⚠️ '} Arkeza API encryption: ${
+      encCfg.enabled
+        ? 'RSA-OAEP-SHA256 active (public key loaded)'
+        : encCfg.forceDisabled
+        ? 'force-disabled via ARKEZA_ENCRYPT=false'
+        : `NOT configured — place tg-public.pem at ${encCfg.keyPathAttempted} (or set ARKEZA_PUBLIC_KEY / ARKEZA_PUBLIC_KEY_FILE)`
+    }`
+  );
 
   // API self-check — non-fatal, but tells Patrick at boot if DNS/TLS/firewall is OK.
   try {

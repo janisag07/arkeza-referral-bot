@@ -3,3 +3,8 @@ node_modules/
 *.db
 *.log
 .DS_Store
+
+# Crypto keys (public or private) — never commit
+keys/*.pem
+keys/*.key
+!keys/README.md
