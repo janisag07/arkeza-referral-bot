@@ -588,6 +588,24 @@ bot.command('stats', async (ctx) => {
   );
 });
 
+// ---- /chatid ----
+// Admin-only utility: prints the current chat's ID + type.
+// Useful to grab the numeric ID of the Arkeza group/channel to feed into
+// ANNOUNCEMENT_CHANNEL_ID in .env.
+
+bot.command('chatid', async (ctx) => {
+  if (!isAdmin(ctx.from.id)) {
+    await ctx.reply('❌ Admin only.');
+    return;
+  }
+  await ctx.reply(
+    `Chat ID: \`${ctx.chat.id}\`\n` +
+      `Type: ${ctx.chat.type}\n` +
+      `Title: ${ctx.chat.title || '(none / DM)'}`,
+    { autoDelete: false, parse_mode: 'Markdown' }
+  );
+});
+
 // ---- /admin ----
 
 bot.command('admin', async (ctx) => {
