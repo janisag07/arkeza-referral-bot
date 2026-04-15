@@ -19,6 +19,8 @@ class ReferralDatabase {
         message_count INTEGER DEFAULT 0,
         is_suspicious INTEGER DEFAULT 0,
         account_created_at INTEGER,
+        confirmed_at INTEGER,
+        verified_at INTEGER,
         FOREIGN KEY (referred_by) REFERENCES users(user_id)
       );
 
@@ -51,6 +53,26 @@ class ReferralDatabase {
       CREATE INDEX IF NOT EXISTS idx_join_timestamp ON join_events(timestamp);
       CREATE INDEX IF NOT EXISTS idx_linked_at ON linked_users(linked_at);
     `);
+
+    // ---- Schema migration for existing DBs ----
+    // `ALTER TABLE ADD COLUMN` is idempotent when guarded by PRAGMA check.
+    this.migrateAddColumnIfMissing('users', 'confirmed_at', 'INTEGER');
+    this.migrateAddColumnIfMissing('users', 'verified_at', 'INTEGER');
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_verified_at ON users(verified_at);
+      CREATE INDEX IF NOT EXISTS idx_confirmed_at ON users(confirmed_at);
+    `);
+  }
+
+  /**
+   * Idempotently add a column to a table. No-op if it already exists.
+   */
+  migrateAddColumnIfMissing(table, column, type) {
+    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all();
+    if (!cols.some((c) => c.name === column)) {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      console.log(`[db] migration: added ${table}.${column}`);
+    }
   }
 
   // ---- M4: Linked-user cache ----
@@ -117,33 +139,73 @@ class ReferralDatabase {
     return this.db.prepare('SELECT * FROM users WHERE user_id = ?').get(userId);
   }
 
-  incrementMessageCount(userId) {
-    const result = this.db.prepare(`
-      UPDATE users SET message_count = message_count + 1 WHERE user_id = ?
-    `).run(userId);
-    
+  /**
+   * Handle a group message from a user according to Patrick's flow:
+   *
+   *   1. First message ever → move user to Pending (set confirmed_at)
+   *      This message does NOT count toward verification yet.
+   *   2. Messages sent WITHIN the 24h waiting window → ignored.
+   *   3. Messages sent AFTER the 24h mark → increment message_count.
+   *   4. message_count >= 3 after the 24h mark → Verified (set verified_at).
+   *
+   * Returns a state string for logging: 'unregistered' | 'ignored'
+   *   | 'confirmed' (first-msg, moved to Pending)
+   *   | 'counting' (post-delay message, counted)
+   *   | 'verified' (just got verified by this message)
+   *   | 'already_verified'
+   */
+  handleGroupMessage(userId) {
     const user = this.getUser(userId);
-    const minMessages = parseInt(process.env.MIN_MESSAGES_FOR_VERIFICATION || 3);
-    const minHours = parseInt(process.env.MIN_HOURS_FOR_VERIFICATION || 24);
+    if (!user) return 'unregistered';
+    if (user.is_verified) return 'already_verified';
+
     const now = Math.floor(Date.now() / 1000);
-    const hoursSinceJoin = (now - user.joined_at) / 3600;
-    
-    // Only verify if: enough messages AND 24h has passed since joining
-    if (user && 
-        user.message_count >= minMessages && 
-        hoursSinceJoin >= minHours && 
-        !user.is_verified) {
-      this.verifyUser(userId);
+    const minMessages = parseInt(process.env.MIN_MESSAGES_FOR_VERIFICATION || 3, 10);
+    const minHours = parseInt(process.env.MIN_HOURS_FOR_VERIFICATION || 24, 10);
+
+    // First message ever → Pending
+    if (!user.confirmed_at) {
+      this.db
+        .prepare('UPDATE users SET confirmed_at = ? WHERE user_id = ?')
+        .run(now, userId);
+      return 'confirmed';
     }
-    
-    return result.changes > 0;
+
+    // Still in the 24h waiting window → message ignored for verification
+    const hoursSinceConfirmed = (now - user.confirmed_at) / 3600;
+    if (hoursSinceConfirmed < minHours) return 'ignored';
+
+    // Post-delay message: count it
+    this.db
+      .prepare('UPDATE users SET message_count = message_count + 1 WHERE user_id = ?')
+      .run(userId);
+    const updated = this.getUser(userId);
+
+    if (updated.message_count >= minMessages) {
+      this.verifyUser(userId);
+      return 'verified';
+    }
+    return 'counting';
   }
 
   verifyUser(userId) {
     const user = this.getUser(userId);
     if (!user || user.is_verified) return false;
 
-    this.db.prepare('UPDATE users SET is_verified = 1 WHERE user_id = ?').run(userId);
+    const now = Math.floor(Date.now() / 1000);
+
+    // Defence-in-depth safeguard (Janis's Apr 06 fix): even if a caller bypasses
+    // handleGroupMessage, verifyUser independently enforces the 24h + 3 messages rule.
+    const minMessages = parseInt(process.env.MIN_MESSAGES_FOR_VERIFICATION || 3, 10);
+    const minHours = parseInt(process.env.MIN_HOURS_FOR_VERIFICATION || 24, 10);
+    if (!user.confirmed_at) return false;
+    const hoursSinceConfirmed = (now - user.confirmed_at) / 3600;
+    if (hoursSinceConfirmed < minHours) return false;
+    if (user.message_count < minMessages) return false;
+
+    this.db
+      .prepare('UPDATE users SET is_verified = 1, verified_at = ? WHERE user_id = ?')
+      .run(now, userId);
 
     if (user.referred_by) {
       this.db.prepare(`
@@ -154,6 +216,15 @@ class ReferralDatabase {
     }
 
     return true;
+  }
+
+  /**
+   * Backwards-compatible shim: older callers may still call incrementMessageCount.
+   * Delegates to the new handleGroupMessage flow.
+   */
+  incrementMessageCount(userId) {
+    const state = this.handleGroupMessage(userId);
+    return state !== 'unregistered' && state !== 'ignored';
   }
 
   markSuspicious(userId) {
@@ -190,7 +261,7 @@ class ReferralDatabase {
 
   getLeaderboard(limit = 10) {
     return this.db.prepare(`
-      SELECT 
+      SELECT
         u.user_id,
         u.username,
         u.first_name,
@@ -202,6 +273,48 @@ class ReferralDatabase {
       ORDER BY verified_referrals DESC, total_referrals DESC
       LIMIT ?
     `).all(limit);
+  }
+
+  /**
+   * Weekly leaderboard — only counts referrals verified within [windowStart, windowEnd).
+   * Patrick's referral campaign rotates weekly; this query groups verified users
+   * (verified_at in the current window) by their referrer.
+   */
+  getWeeklyLeaderboard(windowStartUnix, windowEndUnix, limit = 10) {
+    return this.db.prepare(`
+      SELECT
+        r.user_id,
+        r.username,
+        r.first_name,
+        COUNT(*) as verified_referrals
+      FROM users v
+      JOIN users r ON v.referred_by = r.user_id
+      WHERE v.is_verified = 1
+        AND v.verified_at IS NOT NULL
+        AND v.verified_at >= ?
+        AND v.verified_at < ?
+      GROUP BY r.user_id, r.username, r.first_name
+      ORDER BY verified_referrals DESC, r.joined_at ASC
+      LIMIT ?
+    `).all(windowStartUnix, windowEndUnix, limit);
+  }
+
+  /**
+   * Personal stats for the current week: how many referrals did `userId`
+   * get verified in [windowStartUnix, windowEndUnix)?
+   */
+  getWeeklyReferralCount(userId, windowStartUnix, windowEndUnix) {
+    const row = this.db
+      .prepare(`
+        SELECT COUNT(*) as count FROM users
+        WHERE referred_by = ?
+          AND is_verified = 1
+          AND verified_at IS NOT NULL
+          AND verified_at >= ?
+          AND verified_at < ?
+      `)
+      .get(userId, windowStartUnix, windowEndUnix);
+    return row?.count || 0;
   }
 
   getReferralStats(userId) {

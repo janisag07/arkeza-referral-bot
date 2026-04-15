@@ -461,15 +461,13 @@ async function renderArkezaLeaderboard(ctx, type) {
 
   if (!result.ok) {
     // Arkeza API unreachable / encryption not configured yet.
-    // Don't silently show stale pre-migration DB numbers — it confuses
-    // users into thinking those are live counts. Instead, tell the truth
-    // and let them know the live leaderboard is coming.
-    console.warn(`[leaderboard] Arkeza API failed (${result.message}), showing placeholder`);
+    console.warn(`[leaderboard] Arkeza API failed (${result.message}), pointing user back to group board`);
+    const kb = new InlineKeyboard().text('🏆 Group Leaderboard', 'show_leaderboard_group');
     await ctx.reply(
-      `⏳ Leaderboard coming soon\n\n` +
-        `The live XP and Referral leaderboards from the Arkeza app will appear here ` +
-        `once the API integration is finalized.\n\n` +
-        `Thanks for your patience!`
+      `⏳ Arkeza ${type === 'xp' ? 'XP' : 'Referral'} leaderboard coming soon\n\n` +
+        `Once the Arkeza app integration is finalized, live ${type === 'xp' ? 'XP' : 'app-referral'} data from the app will appear here.\n\n` +
+        `Meanwhile, check out the current group referral campaign:`,
+      { reply_markup: kb }
     );
     return;
   }
@@ -503,8 +501,89 @@ async function renderArkezaLeaderboard(ctx, type) {
   await ctx.reply(message, { reply_markup: kb });
 }
 
+// ---- Weekly window helpers ----
+//
+// Patrick's referral campaign rotates weekly. The week starts on
+// WEEK_START_DAY (default Monday) at WEEK_START_HOUR:00 UTC (default 00 UTC).
+// Both tunable via env so admins can reset the cycle if needed.
+const WEEK_START_DAY = parseInt(process.env.WEEK_START_DAY || '1', 10); // 0=Sun, 1=Mon, ..., 6=Sat
+const WEEK_START_HOUR = parseInt(process.env.WEEK_START_HOUR || '0', 10);
+
+function getCurrentWeekWindow() {
+  const now = new Date();
+  // Walk back to the most recent WEEK_START_DAY at WEEK_START_HOUR UTC.
+  const start = new Date(Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+    WEEK_START_HOUR, 0, 0, 0
+  ));
+  while (start.getUTCDay() !== WEEK_START_DAY || start > now) {
+    start.setUTCDate(start.getUTCDate() - 1);
+  }
+  const end = new Date(start.getTime() + 7 * 24 * 3600 * 1000);
+  return {
+    startUnix: Math.floor(start.getTime() / 1000),
+    endUnix: Math.floor(end.getTime() / 1000),
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+  };
+}
+
+function formatWeeklyBoardHeader() {
+  const w = getCurrentWeekWindow();
+  const startStr = w.startIso.slice(0, 10);
+  const endDay = new Date(w.endUnix * 1000 - 1);
+  const endStr = endDay.toISOString().slice(0, 10);
+  return `📅 Week of ${startStr} → ${endStr}`;
+}
+
+// ---- /leaderboard ----
+// Default = this week's group referrals (Patrick's campaign).
+// Toggle buttons switch to Arkeza XP / Referrals if encryption is live.
+
+async function renderWeeklyGroupLeaderboard(ctx) {
+  const w = getCurrentWeekWindow();
+  const rows = db.getWeeklyLeaderboard(w.startUnix, w.endUnix, 10);
+  const header = formatWeeklyBoardHeader();
+
+  const kb = new InlineKeyboard()
+    .text('🔁 XP', 'show_leaderboard_xp')
+    .text('🔁 Arkeza Refs', 'show_leaderboard_referral');
+
+  if (rows.length === 0) {
+    await ctx.reply(
+      `🏆 Group Referral Leaderboard 🏆\n${header}\n\n` +
+        `No verified referrals yet this week — be the first!\n\n` +
+        `Share your referral link and invite friends. They need to:\n` +
+        `  1. Join the group via your link\n` +
+        `  2. Send a message to confirm\n` +
+        `  3. Stay active: 3 messages after a 24h cool-down\n` +
+        `Then the referral counts toward this week's leaderboard.`,
+      { reply_markup: kb }
+    );
+    return;
+  }
+
+  const medals = ['🥇', '🥈', '🥉'];
+  let message = `🏆 Group Referral Leaderboard 🏆\n${header}\n\n`;
+  rows.forEach((u, i) => {
+    const medal = medals[i] || `${i + 1}.`;
+    const name = u.username ? `@${u.username}` : u.first_name || `User ${u.user_id}`;
+    message += `${medal} ${name}: ${u.verified_referrals} verified refs\n`;
+  });
+
+  const myCount = db.getWeeklyReferralCount(ctx.from.id, w.startUnix, w.endUnix);
+  message += `\n— Your week: ${myCount} verified referral${myCount === 1 ? '' : 's'}`;
+
+  await ctx.reply(message, { reply_markup: kb });
+}
+
 bot.command('leaderboard', async (ctx) => {
-  await renderArkezaLeaderboard(ctx, 'xp');
+  await renderWeeklyGroupLeaderboard(ctx);
+});
+
+bot.callbackQuery('show_leaderboard_group', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await renderWeeklyGroupLeaderboard(ctx);
 });
 
 bot.callbackQuery('show_leaderboard_xp', async (ctx) => {
@@ -542,12 +621,15 @@ bot.command('stats', async (ctx) => {
   }
   const stats = db.getReferralStats(userId);
   const referralLink = getReferralLink(userId);
+  const w = getCurrentWeekWindow();
+  const weeklyVerified = db.getWeeklyReferralCount(userId, w.startUnix, w.endUnix);
   await ctx.reply(
     `📊 Your Referral Stats\n\n` +
-      `✅ Verified Referrals: ${stats.verified_referrals}\n` +
-      `👥 Total Referrals: ${stats.total_referrals}\n\n` +
+      `This week: ${weeklyVerified} verified\n` +
+      `All-time verified: ${stats.verified_referrals}\n` +
+      `All-time total: ${stats.total_referrals}\n\n` +
       `🔗 Your Referral Link:\n${referralLink}\n\n` +
-      `Share this link to grow your referrals!`
+      `Share this link to climb this week's leaderboard!`
   );
 });
 
@@ -650,34 +732,35 @@ bot.on('message:text', async (ctx) => {
   if (ctx.chat.type === 'private') return;
 
   const userId = ctx.from.id;
-  const user = db.getUser(userId);
-  if (user && !user.is_verified) {
-    db.incrementMessageCount(userId);
-    const updatedUser = db.getUser(userId);
-    if (updatedUser.is_verified) {
-      const verifyMsg = await ctx.reply(
-        `✅ ${ctx.from.first_name}, your account is now verified!`
-      );
-      setTimeout(async () => {
-        try {
-          await ctx.api.deleteMessage(verifyMsg.chat.id, verifyMsg.message_id);
-        } catch (e) {
-          /* may already be deleted */
-        }
-      }, 10000);
+  const state = db.handleGroupMessage(userId);
 
-      if (user.referred_by) {
-        const referrer = db.getUser(user.referred_by);
-        if (referrer) {
-          try {
-            await bot.api.sendMessage(
-              user.referred_by,
-              `🎉 Your referral just got verified!\n\n` +
-                `User: ${formatUsername(ctx.from)}\n✅ Confirmed!`
-            );
-          } catch (error) {
-            console.error('Failed to notify referrer:', error.message);
-          }
+  if (state === 'confirmed') {
+    console.log(`✅ ${userId} confirmed → PENDING (24h countdown started)`);
+  } else if (state === 'counting') {
+    const u = db.getUser(userId);
+    console.log(`📝 ${userId} post-delay message ${u.message_count}/3 counted`);
+  } else if (state === 'verified') {
+    const user = db.getUser(userId);
+    console.log(`✅ ${userId} → VERIFIED (post-delay messages met)`);
+    const verifyMsg = await ctx.reply(
+      `✅ ${ctx.from.first_name}, your account is now verified!`,
+      { autoDelete: 10 }
+    );
+    // (verifyMsg auto-deletes via autoDelete=10 in groups thanks to our middleware;
+    // in DMs — shouldn't happen here but — no auto-delete is applied anyway.)
+    void verifyMsg;
+
+    if (user.referred_by) {
+      const referrer = db.getUser(user.referred_by);
+      if (referrer) {
+        try {
+          await bot.api.sendMessage(
+            user.referred_by,
+            `🎉 Your referral just got verified!\n\n` +
+              `User: ${formatUsername(ctx.from)}\n✅ Confirmed!`
+          );
+        } catch (error) {
+          console.error('Failed to notify referrer:', error.message);
         }
       }
     }
