@@ -127,6 +127,14 @@ async function handleLinkToken(ctx, token) {
   const telegramId = ctx.from.id;
   console.log(`[link] /start link attempt from ${telegramId}, token length=${token.length}`);
 
+  const alreadyLinked = db.getLinkedUser(telegramId);
+  if (alreadyLinked) {
+    await ctx.reply(
+      `✅ Your Telegram is already connected to Arkeza${alreadyLinked.arkeza_username ? ` as ${alreadyLinked.arkeza_username}` : ''}. No action needed.`
+    );
+    return;
+  }
+
   await ctx.reply('🔗 Linking your Arkeza account, please wait...');
 
   const result = await arkezaApi.linkUser(telegramId, token);
@@ -597,6 +605,13 @@ bot.command('stats', async (ctx) => {
 // and to the bot itself.
 
 bot.command('connect', async (ctx) => {
+  const linked = db.getLinkedUser(ctx.from.id);
+  if (linked) {
+    await ctx.reply(
+      `✅ Your Telegram is already connected to Arkeza${linked.arkeza_username ? ` as ${linked.arkeza_username}` : ''}. No action needed.`
+    );
+    return;
+  }
   const botLink = `https://t.me/${BOT_USERNAME}`;
   const kb = new InlineKeyboard()
     .url('📱 Open Arkeza (Android)', APP_ANDROID_URL)
