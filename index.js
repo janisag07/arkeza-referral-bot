@@ -972,6 +972,22 @@ async function main() {
 
   // Initialize bot so bot.api.* is usable.
   await bot.init();
+
+  // Register the bot's command menu with Telegram so users see it in the "/" button.
+  await bot.api.setMyCommands([
+    { command: 'start', description: 'Link your Arkeza account or view stats' },
+    { command: 'connect', description: 'Start the linking flow' },
+    { command: 'profile', description: 'Your Arkeza profile (XP, referrals)' },
+    { command: 'leaderboard', description: 'Referral leaderboard' },
+    { command: 'stats', description: 'Your referral stats' },
+    { command: 'website', description: 'Arkeza website' },
+    { command: 'twitter', description: 'Arkeza on X' },
+    { command: 'app', description: 'Android + iOS app links' },
+    { command: 'whitepaper', description: 'Whitepaper PDF' },
+    { command: 'contract', description: 'Token contract address' },
+    { command: 'help', description: 'List all commands' },
+  ]);
+
   console.log(`✅ Telegram identity:    @${bot.botInfo.username} (id ${bot.botInfo.id})`);
   console.log(`✅ Admins configured:    ${ADMIN_IDS.length ? ADMIN_IDS.join(', ') : 'NONE'}`);
   console.log(`✅ Group link:           ${GROUP_LINK}`);
