@@ -57,6 +57,16 @@ class ReferralDatabase {
         label TEXT
       );
 
+      -- Milestone dedup log: each milestone fires ONCE per user.
+      CREATE TABLE IF NOT EXISTS milestone_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        milestone_type TEXT NOT NULL,
+        milestone_value INTEGER NOT NULL,
+        announced_at INTEGER NOT NULL,
+        UNIQUE(username, milestone_type, milestone_value)
+      );
+
       CREATE INDEX IF NOT EXISTS idx_referred_by ON users(referred_by);
       CREATE INDEX IF NOT EXISTS idx_verified ON users(is_verified);
       CREATE INDEX IF NOT EXISTS idx_suspicious ON users(is_suspicious);
@@ -314,6 +324,33 @@ class ReferralDatabase {
       .prepare('INSERT INTO campaign_cycles (started_at, started_by, label) VALUES (?, ?, ?)')
       .run(now, adminUserId, label);
     return now;
+  }
+
+  // ---- Milestone dedup log ----
+
+  /**
+   * Check if a milestone has already been announced for this user.
+   * Returns true if already logged (= skip announcement).
+   */
+  isMilestoneAnnounced(username, milestoneType, milestoneValue) {
+    const row = this.db
+      .prepare(
+        'SELECT 1 FROM milestone_log WHERE username = ? AND milestone_type = ? AND milestone_value = ?'
+      )
+      .get(username, milestoneType, milestoneValue);
+    return !!row;
+  }
+
+  /**
+   * Record that a milestone was announced. INSERT OR IGNORE for idempotency.
+   */
+  logMilestone(username, milestoneType, milestoneValue) {
+    const now = Math.floor(Date.now() / 1000);
+    this.db
+      .prepare(
+        'INSERT OR IGNORE INTO milestone_log (username, milestone_type, milestone_value, announced_at) VALUES (?, ?, ?, ?)'
+      )
+      .run(username, milestoneType, milestoneValue, now);
   }
 
   /**

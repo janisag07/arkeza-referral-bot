@@ -852,6 +852,15 @@ bot.catch((err) => {
 });
 
 // ---- Arkeza inbound webhook handler (milestones + announcements) ----
+//
+// Per Patrick's "arkeza milestone spec.docx":
+//   - Each milestone fires BOTH a public post + a private DM simultaneously
+//   - Public post uses custom 3-line templates (achievement / social pressure / CTA)
+//   - Private DM only if telegramId is available
+//   - Each milestone fires ONCE per user (dedup via milestone_log table)
+//   - Admin announcements broadcast to channel as before
+
+const milestoneTemplates = require('./milestone-templates');
 
 async function handleArkezaEvent(payload) {
   if (!payload || !payload.event) {
@@ -861,10 +870,7 @@ async function handleArkezaEvent(payload) {
 
   const ev = payload.event;
 
-  // Admin announcement → broadcast to channel.
-  // NOTE: parse_mode intentionally OMITTED — usernames / messages from the
-  // app may contain raw `_`, `*`, `[`, etc. which crash Telegram's Markdown
-  // parser. See commit 7e8ff74 for the original incident.
+  // ---- Admin announcement ----
   if (ev === 'admin_announcement') {
     const text = `📣 Announcement\n\n${payload.message || ''}`;
     if (ANNOUNCEMENT_CHANNEL_ID) {
@@ -879,36 +885,66 @@ async function handleArkezaEvent(payload) {
     return;
   }
 
-  // Milestone events: milestone.referrals / .tasks / .streak / .xp / .tier
+  // ---- Milestone events ----
   if (ev.startsWith('milestone.')) {
-    const visibility = payload.milestonePostVisibility || 'public';
-    const message = payload.message || `🎯 ${payload.username || 'A user'} reached a milestone.`;
+    const type = payload.type;
+    const newValue = payload.newValue;
+    const username = payload.username || 'A user';
+    const telegramId =
+      payload.telegramId || db.getLinkedTelegramIdByUsername(username);
 
-    if (visibility === 'private') {
-      const tgId =
-        payload.telegramId || db.getLinkedTelegramIdByUsername(payload.username);
-      if (!tgId) {
-        console.warn(`[arkeza-event] private milestone but no telegramId resolvable: ${ev}`);
-        return;
-      }
-      try {
-        await bot.api.sendMessage(tgId, message);
-      } catch (err) {
-        console.error(`[arkeza-event] DM to ${tgId} failed:`, err.message);
-      }
+    // Dedup: each milestone fires once per user
+    if (db.isMilestoneAnnounced(username, type, newValue)) {
+      console.log(`[arkeza-event] ${ev} ${username}=${newValue} already announced, skipping`);
       return;
     }
 
-    // public
+    // Look up custom template
+    const template = milestoneTemplates.getTemplate(type, newValue);
+
+    // Build messages
+    let publicText, dmText;
+    if (template) {
+      publicText = milestoneTemplates.renderPublic(template, username);
+      dmText = milestoneTemplates.renderPrivate(template, username);
+    } else {
+      // Fallback for milestone types/values not in our template table
+      // (e.g. tier milestones, referrals milestones, or future thresholds)
+      const fallbackMsg = payload.message || `🎯 ${username} reached a milestone!`;
+      publicText = fallbackMsg;
+      dmText = `🎉 Congratulations ${username}!\n\n${fallbackMsg}`;
+    }
+
+    // 1) PUBLIC post — fires regardless of Telegram link status
+    const appKb = new InlineKeyboard()
+      .url('📱 Open App (Android)', APP_ANDROID_URL)
+      .url('📱 Open App (iOS)', APP_IOS_URL);
+
     if (ANNOUNCEMENT_CHANNEL_ID) {
       try {
-        await bot.api.sendMessage(ANNOUNCEMENT_CHANNEL_ID, message);
+        await bot.api.sendMessage(ANNOUNCEMENT_CHANNEL_ID, publicText, {
+          reply_markup: appKb,
+        });
+        console.log(`[arkeza-event] public milestone posted: ${ev} ${username}=${newValue}`);
       } catch (err) {
         console.error('[arkeza-event] failed to post public milestone:', err.message);
       }
     } else {
-      console.log('[arkeza-event] public milestone (no channel configured):', message);
+      console.log('[arkeza-event] public milestone (no channel configured):', publicText);
     }
+
+    // 2) PRIVATE DM — only if telegramId is available
+    if (telegramId) {
+      try {
+        await bot.api.sendMessage(telegramId, dmText);
+        console.log(`[arkeza-event] DM sent to ${telegramId} for ${ev}`);
+      } catch (err) {
+        console.error(`[arkeza-event] DM to ${telegramId} failed:`, err.message);
+      }
+    }
+
+    // Log the milestone to prevent duplicates
+    db.logMilestone(username, type, newValue);
     return;
   }
 
