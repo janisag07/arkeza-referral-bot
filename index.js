@@ -32,7 +32,7 @@ const WELCOME_NEW_MEMBERS = (process.env.WELCOME_NEW_MEMBERS || 'true').toLowerC
 // ---- Info URLs (exposed via /website, /twitter, /whitepaper, /app, /contract) ----
 const WEBSITE_URL = process.env.WEBSITE_URL || 'https://arkeza.io/';
 const TWITTER_URL = process.env.TWITTER_URL || 'https://x.com/arkeza_hub';
-const WHITEPAPER_URL = process.env.WHITEPAPER_URL || 'https://arkeza.io/assets/document/whitepaper.pdf';
+const WHITEPAPER_URL = process.env.WHITEPAPER_URL || 'https://arkeza.io/assets/document/arkeza-whitepaper.pdf';
 const APP_ANDROID_URL = process.env.APP_ANDROID_URL || 'https://play.google.com/store/apps/details?id=com.arkeza.app';
 const APP_IOS_URL = process.env.APP_IOS_URL || 'https://apps.apple.com/us/app/arkeza/id6757733204';
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS || 'Token Launch Upcoming — Stay tuned!';
