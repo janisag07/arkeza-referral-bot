@@ -163,8 +163,8 @@ async function handleLinkToken(ctx, token) {
     .url('💬 Join Group', GROUP_LINK)
     .url('🌐 Website', WEBSITE_URL)
     .row()
-    .url('📱 Android', APP_ANDROID_URL)
-    .url('📱 iOS', APP_IOS_URL);
+    .url('Android 📱', APP_ANDROID_URL)
+    .url('iOS 📱', APP_IOS_URL);
 
   await ctx.reply(
     `✅ Successfully linked${arkezaUsername ? ` as ${arkezaUsername}` : ''}!\n\n` +
@@ -382,8 +382,8 @@ bot.on('message:new_chat_members', async (ctx) => {
       .url('🚀 Start Bot', deepLink)
       .url('🌐 Website', WEBSITE_URL)
       .row()
-      .url('📱 App (Android)', APP_ANDROID_URL)
-      .url('📱 App (iOS)', APP_IOS_URL);
+      .url('Android 📱', APP_ANDROID_URL)
+      .url('iOS 📱', APP_IOS_URL);
     try {
       const msg = await ctx.reply(
         `👋 Welcome ${displayName}!\n\n` +
@@ -666,8 +666,8 @@ bot.command('connect', async (ctx) => {
   }
   const botLink = `https://t.me/${BOT_USERNAME}`;
   const kb = new InlineKeyboard()
-    .url('📱 Open Arkeza (Android)', APP_ANDROID_URL)
-    .url('📱 Open Arkeza (iOS)', APP_IOS_URL)
+    .url('Android 📱', APP_ANDROID_URL)
+    .url('iOS 📱', APP_IOS_URL)
     .row()
     .url('🚀 Open Bot', botLink);
   await ctx.reply(
@@ -975,8 +975,8 @@ async function handleArkezaEvent(payload) {
 
     // 1) PUBLIC post — fires regardless of Telegram link status
     const appKb = new InlineKeyboard()
-      .url('📱 Open App (Android)', APP_ANDROID_URL)
-      .url('📱 Open App (iOS)', APP_IOS_URL);
+      .url('Android 📱', APP_ANDROID_URL)
+      .url('iOS 📱', APP_IOS_URL);
 
     if (ANNOUNCEMENT_CHANNEL_ID) {
       try {
