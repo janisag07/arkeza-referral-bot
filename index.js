@@ -902,16 +902,22 @@ async function handleArkezaEvent(payload) {
     // Look up custom template
     const template = milestoneTemplates.getTemplate(type, newValue);
 
-    // Build messages
+    // Build messages.
+    // Priority: use Mit's `message` field (contains lines 1+2 separated by \n).
+    // We append the CTA (line 3) + app buttons.
+    // Fallback: our local template table if Mit's message is missing or empty.
     let publicText, dmText;
-    if (template) {
+
+    if (payload.message && payload.message.includes('\n')) {
+      // Mit sends line1\nline2 — we append CTA as line 3
+      publicText = `${payload.message}\n${milestoneTemplates.CTA}`;
+      dmText = `🎉 Congratulations ${username}!\n\n${payload.message.split('\n')[0]}\n\nKeep going — your grind is paying off!`;
+    } else if (template) {
       publicText = milestoneTemplates.renderPublic(template, username);
       dmText = milestoneTemplates.renderPrivate(template, username);
     } else {
-      // Fallback for milestone types/values not in our template table
-      // (e.g. tier milestones, referrals milestones, or future thresholds)
       const fallbackMsg = payload.message || `🎯 ${username} reached a milestone!`;
-      publicText = fallbackMsg;
+      publicText = `${fallbackMsg}\n${milestoneTemplates.CTA}`;
       dmText = `🎉 Congratulations ${username}!\n\n${fallbackMsg}`;
     }
 
