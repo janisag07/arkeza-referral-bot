@@ -16,7 +16,7 @@
 const axios = require('axios');
 const arkezaCrypto = require('./arkeza-crypto');
 
-const BASE_URL = process.env.ARKEZA_API_BASE_URL || 'https://arkza-api.arkeza.io/api/telegram/v1';
+const BASE_URL = process.env.ARKEZA_API_BASE_URL || 'https://arkza-api.arkeza.io/api/telegram/v2';
 const API_KEY = process.env.ARKEZA_API_KEY || '';
 const TIMEOUT_MS = parseInt(process.env.ARKEZA_API_TIMEOUT_MS || '10000', 10);
 
@@ -142,11 +142,29 @@ async function isLinked(telegramId) {
   }
 }
 
+/**
+ * POST /referral-contest-leaderboard
+ * Fetch the app referral contest standings + last week's winners.
+ *
+ * @param {string|number} telegramId
+ */
+async function getReferralContestLeaderboard(telegramId) {
+  try {
+    const data = await postWithOptionalEncryption('/referral-contest-leaderboard', {
+      telegramId: String(telegramId),
+    });
+    return { ok: !!data?.success, message: data?.message || '', data: data?.data };
+  } catch (err) {
+    return wrapError(err, '/referral-contest-leaderboard');
+  }
+}
+
 module.exports = {
   linkUser,
   getUserData,
   getLeaderboard,
   isLinked,
+  getReferralContestLeaderboard,
   // exported for tests/diagnostics
   _client: client,
   _config: {

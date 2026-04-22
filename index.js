@@ -346,7 +346,8 @@ bot.command('help', async (ctx) => {
       `/link <token>     — Manual alternative to the deep-link\n` +
       `/connect          — Start the linking flow (for members already in the group)\n` +
       `/profile          — Your Arkeza profile (XP, referrals)\n` +
-      `/leaderboard      — XP + Referral leaderboards\n` +
+      `/leaderboard      — Group referral leaderboard\n` +
+      `/refcontest       — App referral contest + last week's winners\n` +
       `/stats            — Your in-bot referral stats\n` +
       `/website          — Arkeza website\n` +
       `/twitter          — Arkeza on X\n` +
@@ -511,7 +512,7 @@ async function renderCycleGroupLeaderboard(ctx) {
 
   const kb = new InlineKeyboard()
     .text('🔁 XP', 'show_leaderboard_xp')
-    .text('🔁 Arkeza Refs', 'show_leaderboard_referral');
+    .text('🏅 App Contest', 'show_refcontest');
 
   if (rows.length === 0) {
     await ctx.reply(
@@ -558,6 +559,57 @@ bot.callbackQuery('show_leaderboard_xp', async (ctx) => {
 bot.callbackQuery('show_leaderboard_referral', async (ctx) => {
   await ctx.answerCallbackQuery();
   await renderArkezaLeaderboard(ctx, 'referral');
+});
+
+// ---- /refcontest — App Referral Contest Leaderboard (V2 endpoint) ----
+
+async function renderRefContestLeaderboard(ctx) {
+  const telegramId = ctx.from.id;
+  const result = await arkezaApi.getReferralContestLeaderboard(telegramId);
+
+  if (!result.ok) {
+    await ctx.reply(`⏳ Referral contest leaderboard unavailable right now.`);
+    return;
+  }
+
+  const d = result.data || {};
+  const medals = ['🥇', '🥈', '🥉'];
+  let msg = '🏆 App Referral Contest 🏆\n\n';
+
+  const current = d.leaderboard || [];
+  if (current.length > 0) {
+    msg += '📊 Current standings:\n';
+    current.forEach((u, i) => {
+      const medal = medals[i] || `${u.rank || i + 1}.`;
+      msg += `${medal} ${u.username}: ${u.referrals} referrals\n`;
+    });
+  } else {
+    msg += 'No contest entries yet.\n';
+  }
+
+  const lastWeek = d.lastweekwinner || [];
+  if (lastWeek.length > 0) {
+    msg += '\n🏅 Last week\'s winners:\n';
+    lastWeek.forEach((u) => {
+      const medal = medals[(u.rank || 1) - 1] || `${u.rank}.`;
+      msg += `${medal} ${u.username}: ${u.referrals} referrals\n`;
+    });
+  }
+
+  const kb = new InlineKeyboard()
+    .text('🔁 Group Board', 'show_leaderboard_group')
+    .text('🔁 XP', 'show_leaderboard_xp');
+
+  await ctx.reply(msg, { reply_markup: kb });
+}
+
+bot.command('refcontest', async (ctx) => {
+  await renderRefContestLeaderboard(ctx);
+});
+
+bot.callbackQuery('show_refcontest', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await renderRefContestLeaderboard(ctx);
 });
 
 bot.callbackQuery('show_profile', async (ctx) => {
@@ -1020,7 +1072,8 @@ async function main() {
     { command: 'start', description: 'Link your Arkeza account or view stats' },
     { command: 'connect', description: 'Start the linking flow' },
     { command: 'profile', description: 'Your Arkeza profile (XP, referrals)' },
-    { command: 'leaderboard', description: 'Referral leaderboard' },
+    { command: 'leaderboard', description: 'Group referral leaderboard' },
+    { command: 'refcontest', description: 'App referral contest + last week winners' },
     { command: 'stats', description: 'Your referral stats' },
     { command: 'website', description: 'Arkeza website' },
     { command: 'twitter', description: 'Arkeza on X' },
