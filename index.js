@@ -980,10 +980,16 @@ async function handleArkezaEvent(payload) {
 
     if (ANNOUNCEMENT_CHANNEL_ID) {
       try {
-        await bot.api.sendMessage(ANNOUNCEMENT_CHANNEL_ID, publicText, {
+        const msg = await bot.api.sendMessage(ANNOUNCEMENT_CHANNEL_ID, publicText, {
           reply_markup: appKb,
         });
         console.log(`[arkeza-event] public milestone posted: ${ev} ${username}=${newValue}`);
+        // Auto-delete milestone posts after 60s to keep channel clean
+        setTimeout(async () => {
+          try {
+            await bot.api.deleteMessage(msg.chat.id, msg.message_id);
+          } catch (_) { /* may already be deleted */ }
+        }, AUTO_DELETE_SECONDS * 1000);
       } catch (err) {
         console.error('[arkeza-event] failed to post public milestone:', err.message);
       }
