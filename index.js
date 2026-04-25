@@ -2,6 +2,7 @@ require('dotenv').config();
 const { Bot, GrammyError, HttpError, InlineKeyboard } = require('grammy');
 const ReferralDatabase = require('./database');
 const arkezaApi = require('./arkeza-api');
+const { ensureLinkedUser, isAnonymousGroupSender, anonymousSenderMessage } = require('./link-status');
 const { startWebhookServer, paths } = require('./webhook-server');
 const fs = require('fs');
 const { execSync } = require('child_process');
@@ -404,21 +405,27 @@ bot.on('message:new_chat_members', async (ctx) => {
 
 // ---- /profile (Arkeza app data) ----
 
-bot.command('profile', async (ctx) => {
+async function renderProfile(ctx) {
+  if (isAnonymousGroupSender(ctx)) {
+    await ctx.reply(anonymousSenderMessage());
+    return;
+  }
+
   const telegramId = ctx.from.id;
+  const linked = await ensureLinkedUser(telegramId, db, arkezaApi);
+
+  if (!linked.linked) {
+    await ctx.reply('❌ You are not linked yet. Open the link from the Arkeza app first.');
+    return;
+  }
+
   const result = await arkezaApi.getUserData(telegramId);
 
   if (!result.ok) {
-    if (result.status === 404) {
-      await ctx.reply('❌ You are not linked yet. Open the link from the Arkeza app first.');
-      return;
-    }
-    // API unreachable → honest "coming soon" rather than confusing local stats
-    // that look like Arkeza app stats but aren't.
+    // Do not tell a linked user they are unlinked just because /user-data is temporarily unavailable.
     await ctx.reply(
-      `⏳ Profile coming soon\n\n` +
-        `Your XP and referral stats from the Arkeza app will appear here ` +
-        `once the API integration is finalized. Thanks for your patience!`
+      `⏳ Profile unavailable right now\n\n` +
+        `I can see your Telegram is linked to Arkeza, but the profile data endpoint did not return your stats yet. Please try again shortly.`
     );
     return;
   }
@@ -426,10 +433,14 @@ bot.command('profile', async (ctx) => {
   const d = result.data || {};
   await ctx.reply(
     `👤 Your Arkeza Profile\n\n` +
-      `Username: ${d.username || '—'}\n` +
+      `Username: ${d.username || linked.username || '—'}\n` +
       `XP: ${d.xp ?? 0}\n` +
       `Referrals: ${d.referrals ?? 0}`
   );
+}
+
+bot.command('profile', async (ctx) => {
+  await renderProfile(ctx);
 });
 
 // ---- /leaderboard ----
@@ -564,11 +575,25 @@ bot.callbackQuery('show_leaderboard_referral', async (ctx) => {
 // ---- /refcontest — App Referral Contest Leaderboard (V2 endpoint) ----
 
 async function renderRefContestLeaderboard(ctx) {
+  if (isAnonymousGroupSender(ctx)) {
+    await ctx.reply(anonymousSenderMessage());
+    return;
+  }
+
   const telegramId = ctx.from.id;
   const result = await arkezaApi.getReferralContestLeaderboard(telegramId);
 
   if (!result.ok) {
-    await ctx.reply(`⏳ Referral contest leaderboard unavailable right now.`);
+    const linked = await ensureLinkedUser(telegramId, db, arkezaApi);
+    if (!linked.linked) {
+      await ctx.reply('❌ You are not linked yet. Open the link from the Arkeza app first.');
+      return;
+    }
+
+    await ctx.reply(
+      `⏳ Referral contest leaderboard unavailable right now.\n\n` +
+        `I can see your Telegram is linked to Arkeza, but the contest endpoint did not return the leaderboard yet. Please try again shortly.`
+    );
     return;
   }
 
@@ -614,16 +639,7 @@ bot.callbackQuery('show_refcontest', async (ctx) => {
 
 bot.callbackQuery('show_profile', async (ctx) => {
   await ctx.answerCallbackQuery();
-  const telegramId = ctx.from.id;
-  const result = await arkezaApi.getUserData(telegramId);
-  if (!result.ok) {
-    await ctx.reply(`❌ Could not fetch profile: ${result.message}`);
-    return;
-  }
-  const d = result.data || {};
-  await ctx.reply(
-    `👤 ${d.username || 'Profile'}\nXP: ${d.xp ?? 0}\nReferrals: ${d.referrals ?? 0}`
-  );
+  await renderProfile(ctx);
 });
 
 // ---- /stats (legacy, in-bot referrals) ----
@@ -657,10 +673,15 @@ bot.command('stats', async (ctx) => {
 // and to the bot itself.
 
 bot.command('connect', async (ctx) => {
-  const linked = db.getLinkedUser(ctx.from.id);
-  if (linked) {
+  if (isAnonymousGroupSender(ctx)) {
+    await ctx.reply(anonymousSenderMessage());
+    return;
+  }
+
+  const linked = await ensureLinkedUser(ctx.from.id, db, arkezaApi);
+  if (linked.linked) {
     await ctx.reply(
-      `✅ Your Telegram is already connected to Arkeza${linked.arkeza_username ? ` as ${linked.arkeza_username}` : ''}. No action needed.`
+      `✅ Your Telegram is already connected to Arkeza${linked.username ? ` as ${linked.username}` : ''}. No action needed.`
     );
     return;
   }
