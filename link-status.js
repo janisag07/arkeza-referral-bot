@@ -9,7 +9,9 @@ function isAnonymousGroupSender(ctx) {
 function anonymousSenderMessage() {
   return (
     '❌ Telegram sent this command as the group/channel identity, not as your personal account.\n\n' +
-    'Please send the command from your normal Telegram user account, or turn off “Remain anonymous” for admins and try again.'
+    'That means I cannot match this command to your linked Arkeza profile.\n\n' +
+    'Please send the command from your normal Telegram user account. If you are an admin, turn off “Remain anonymous” for this group and try again.\n\n' +
+    'Telegram path: Group info → Edit → Administrators → your admin account → disable “Remain Anonymous”.'
   );
 }
 

@@ -454,6 +454,11 @@ bot.command('profile', async (ctx) => {
 // Secondary (via inline button): Arkeza app XP / Referrals leaderboard.
 
 async function renderArkezaLeaderboard(ctx, type) {
+  if (isAnonymousGroupSender(ctx)) {
+    await ctx.reply(anonymousSenderMessage());
+    return;
+  }
+
   const telegramId = ctx.from.id;
   const result = await arkezaApi.getLeaderboard(telegramId, type);
 
@@ -517,6 +522,11 @@ function formatCycleHeader() {
 // Toggle buttons switch to Arkeza XP / Referrals.
 
 async function renderCycleGroupLeaderboard(ctx) {
+  if (isAnonymousGroupSender(ctx)) {
+    await ctx.reply(anonymousSenderMessage());
+    return;
+  }
+
   const cycleStart = db.getCurrentCycleStart();
   const rows = db.getCycleLeaderboard(cycleStart, 10);
   const header = formatCycleHeader();
