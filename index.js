@@ -703,9 +703,11 @@ bot.command('connect', async (ctx) => {
     .url('🚀 Open Bot', botLink);
   await ctx.reply(
     `🔗 Link your Telegram to Arkeza\n\n` +
-      `1. Open the Arkeza app and tap "Connect Telegram"\n` +
-      `2. Follow the deep-link it gives you — the bot will pick it up\n` +
-      `3. Or paste the token manually with /link <token>\n\n` +
+      `1. Open the Arkeza app\n` +
+      `2. Go to the profile\n` +
+      `3. Tap "Connect Telegram"\n` +
+      `4. Follow the deep-link it gives you — the bot will pick it up\n` +
+      `5. Or paste the token manually with /link <token>\n\n` +
       `Buttons below for the app + bot.`,
     { reply_markup: kb }
   );
