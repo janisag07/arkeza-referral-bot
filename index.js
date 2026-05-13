@@ -509,7 +509,7 @@ async function renderArkezaLeaderboard(ctx, type) {
 //
 // Per Patrick's spec, the leaderboard does NOT auto-rotate on a weekly
 // schedule. Admins explicitly start a new cycle via `/admin cycle`.
-// Only referrals verified at or after the current cycle's started_at
+// Only referrals verified after the current cycle's started_at
 // timestamp count toward the current leaderboard.
 
 function formatCycleHeader() {
@@ -662,12 +662,14 @@ async function renderTelegramReferralStats(ctx) {
 
   const userId = ctx.from.id;
   const user = db.getUser(userId);
-  const confirmed = user ? db.getReferralStats(userId).verified_referrals : 0;
+  const cycleStart = db.getCurrentCycleStart();
+  const confirmed = user ? db.getCycleReferralCount(userId, cycleStart) : 0;
 
   await ctx.reply(
     `📊 Your Telegram Referrals\n\n` +
-      `Confirmed referrals: ${confirmed}\n\n` +
-      `A Telegram referral is confirmed once the invited user sends their first message in the group.`
+      `Confirmed referrals this cycle: ${confirmed}\n\n` +
+      `A Telegram referral is confirmed once the invited user sends their first message in the group.\n` +
+      `Admins can start a new cycle with /admin cycle to reset the visible count.`
   );
 }
 

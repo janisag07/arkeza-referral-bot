@@ -334,9 +334,9 @@ class ReferralDatabase {
   }
 
   /**
-   * Cycle leaderboard — only counts referrals verified AT OR AFTER cycleStart.
+   * Cycle leaderboard — only counts referrals verified AFTER cycleStart.
    * Patrick's campaign rotates on explicit admin command; this query groups
-   * verified users (verified_at >= cycleStart) by their referrer.
+   * verified users (verified_at > cycleStart) by their referrer.
    */
   getCycleLeaderboard(cycleStartUnix, limit = 10) {
     return this.db.prepare(`
@@ -349,7 +349,7 @@ class ReferralDatabase {
       JOIN users r ON v.referred_by = r.user_id
       WHERE v.is_verified = 1
         AND v.verified_at IS NOT NULL
-        AND v.verified_at >= ?
+        AND v.verified_at > ?
       GROUP BY r.user_id, r.username, r.first_name
       ORDER BY verified_referrals DESC, r.joined_at ASC
       LIMIT ?
@@ -367,7 +367,7 @@ class ReferralDatabase {
         WHERE referred_by = ?
           AND is_verified = 1
           AND verified_at IS NOT NULL
-          AND verified_at >= ?
+          AND verified_at > ?
       `)
       .get(userId, cycleStartUnix);
     return row?.count || 0;
