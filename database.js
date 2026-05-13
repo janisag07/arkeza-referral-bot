@@ -160,19 +160,14 @@ class ReferralDatabase {
   }
 
   /**
-   * Handle a group message from a user according to Patrick's flow:
+   * Handle a group message from a user according to Patrick's Telegram-only flow:
    *
-   *   1. First message ever → move user to Pending (set confirmed_at)
-   *      This message does NOT count toward verification yet.
-   *   2. Messages sent WITHIN the 24h waiting window → ignored.
-   *   3. Messages sent AFTER the 24h mark → increment message_count.
-   *   4. message_count >= 3 after the 24h mark → Verified (set verified_at).
+   *   1. Join via referral link = Pending (created by addUser, counted only as total).
+   *   2. First real message in the group = Confirmed (is_verified=1, verified_at set).
    *
-   * Returns a state string for logging: 'unregistered' | 'ignored'
-   *   | 'confirmed' (first-msg, moved to Pending)
-   *   | 'counting' (post-delay message, counted)
-   *   | 'verified' (just got verified by this message)
-   *   | 'already_verified'
+   * This deliberately does NOT touch the Arkeza app referral system.
+   *
+   * Returns a state string for logging: 'unregistered' | 'verified' | 'already_verified'
    */
   handleGroupMessage(userId) {
     const user = this.getUser(userId);
@@ -180,32 +175,13 @@ class ReferralDatabase {
     if (user.is_verified) return 'already_verified';
 
     const now = Math.floor(Date.now() / 1000);
-    const minMessages = parseInt(process.env.MIN_MESSAGES_FOR_VERIFICATION || 3, 10);
-    const minHours = parseInt(process.env.MIN_HOURS_FOR_VERIFICATION || 24, 10);
 
-    // First message ever → Pending
-    if (!user.confirmed_at) {
-      this.db
-        .prepare('UPDATE users SET confirmed_at = ? WHERE user_id = ?')
-        .run(now, userId);
-      return 'confirmed';
-    }
-
-    // Still in the 24h waiting window → message ignored for verification
-    const hoursSinceConfirmed = (now - user.confirmed_at) / 3600;
-    if (hoursSinceConfirmed < minHours) return 'ignored';
-
-    // Post-delay message: count it
+    // First group message confirms the Telegram referral immediately.
     this.db
-      .prepare('UPDATE users SET message_count = message_count + 1 WHERE user_id = ?')
-      .run(userId);
-    const updated = this.getUser(userId);
-
-    if (updated.message_count >= minMessages) {
-      this.verifyUser(userId);
-      return 'verified';
-    }
-    return 'counting';
+      .prepare('UPDATE users SET confirmed_at = COALESCE(confirmed_at, ?), message_count = message_count + 1 WHERE user_id = ?')
+      .run(now, userId);
+    this.verifyUser(userId);
+    return 'verified';
   }
 
   verifyUser(userId) {
@@ -214,14 +190,9 @@ class ReferralDatabase {
 
     const now = Math.floor(Date.now() / 1000);
 
-    // Defence-in-depth safeguard (Janis's Apr 06 fix): even if a caller bypasses
-    // handleGroupMessage, verifyUser independently enforces the 24h + 3 messages rule.
-    const minMessages = parseInt(process.env.MIN_MESSAGES_FOR_VERIFICATION || 3, 10);
-    const minHours = parseInt(process.env.MIN_HOURS_FOR_VERIFICATION || 24, 10);
+    // Telegram-only confirmation: first group message after joining is enough.
+    // Keep this separate from the Arkeza app referral mechanics.
     if (!user.confirmed_at) return false;
-    const hoursSinceConfirmed = (now - user.confirmed_at) / 3600;
-    if (hoursSinceConfirmed < minHours) return false;
-    if (user.message_count < minMessages) return false;
 
     this.db
       .prepare('UPDATE users SET is_verified = 1, verified_at = ? WHERE user_id = ?')

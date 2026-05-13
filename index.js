@@ -21,7 +21,7 @@ try {
 // ---- Config ----
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const BOT_USERNAME = process.env.BOT_USERNAME || 'Arkezabot';
-const GROUP_LINK = process.env.GROUP_LINK || 'https://t.me/arkezahub';
+const GROUP_LINK = process.env.GROUP_LINK || 'https://t.me/arkezaofficial';
 const ADMIN_IDS = process.env.ADMIN_IDS?.split(',').map((id) => parseInt(id.trim())) || [];
 const RATE_LIMIT_MAX_JOINS = parseInt(process.env.RATE_LIMIT_MAX_JOINS || 10);
 const RATE_LIMIT_WINDOW_HOURS = parseInt(process.env.RATE_LIMIT_WINDOW_HOURS || 24);
@@ -252,7 +252,7 @@ bot.command('start', async (ctx) => {
     `📊 Commands:\n` +
     `/profile - Your Arkeza profile (after linking)\n` +
     `/leaderboard - View top referrers / XP\n` +
-    `/stats - Your referral statistics`;
+    `/tgreferrals - Your confirmed Telegram referrals`;
 
   await ctx.reply(welcomeMessage);
 
@@ -348,6 +348,7 @@ bot.command('help', async (ctx) => {
       `/connect          — Start the linking flow (for members already in the group)\n` +
       `/profile          — Your Arkeza profile (XP, referrals)\n` +
       `/leaderboard      — Group referral leaderboard\n` +
+      `/tgreferrals      — Your confirmed Telegram referral count\n` +
       `/refcontest       — App referral contest + last week's winners\n` +
       `/stats            — Your in-bot referral stats\n` +
       `/website          — Arkeza website\n` +
@@ -541,9 +542,8 @@ async function renderCycleGroupLeaderboard(ctx) {
         `No verified referrals yet this cycle — be the first!\n\n` +
         `Share your referral link and invite friends. They need to:\n` +
         `  1. Join the group via your link\n` +
-        `  2. Send a message to confirm (Pending)\n` +
-        `  3. Stay active: 3 messages after a 24h cool-down → Verified\n` +
-        `Only Verified referrals count toward the current cycle.`,
+        `  2. Send their first message in the group to confirm\n` +
+        `Only confirmed Telegram referrals count toward the current cycle.`,
       { reply_markup: kb }
     );
     return;
@@ -650,6 +650,29 @@ bot.callbackQuery('show_refcontest', async (ctx) => {
 bot.callbackQuery('show_profile', async (ctx) => {
   await ctx.answerCallbackQuery();
   await renderProfile(ctx);
+});
+
+// ---- /tgreferrals (Telegram-only referral count; does NOT touch app referrals) ----
+
+async function renderTelegramReferralStats(ctx) {
+  if (isAnonymousGroupSender(ctx)) {
+    await ctx.reply(anonymousSenderMessage());
+    return;
+  }
+
+  const userId = ctx.from.id;
+  const user = db.getUser(userId);
+  const confirmed = user ? db.getReferralStats(userId).verified_referrals : 0;
+
+  await ctx.reply(
+    `📊 Your Telegram Referrals\n\n` +
+      `Confirmed referrals: ${confirmed}\n\n` +
+      `A Telegram referral is confirmed once the invited user sends their first message in the group.`
+  );
+}
+
+bot.command('tgreferrals', async (ctx) => {
+  await renderTelegramReferralStats(ctx);
 });
 
 // ---- /stats (legacy, in-bot referrals) ----
@@ -884,13 +907,13 @@ bot.on('message:text', async (ctx) => {
   const state = db.handleGroupMessage(userId);
 
   if (state === 'confirmed') {
-    console.log(`✅ ${userId} confirmed → PENDING (24h countdown started)`);
+    console.log(`✅ ${userId} confirmed by first group message`);
   } else if (state === 'counting') {
     const u = db.getUser(userId);
     console.log(`📝 ${userId} post-delay message ${u.message_count}/3 counted`);
   } else if (state === 'verified') {
     const user = db.getUser(userId);
-    console.log(`✅ ${userId} → VERIFIED (post-delay messages met)`);
+    console.log(`✅ ${userId} → CONFIRMED (first group message)`);
     const verifyMsg = await ctx.reply(
       `✅ ${ctx.from.first_name}, your account is now verified!`,
       { autoDelete: 10 }
@@ -905,8 +928,8 @@ bot.on('message:text', async (ctx) => {
         try {
           await bot.api.sendMessage(
             user.referred_by,
-            `🎉 Your referral just got verified!\n\n` +
-              `User: ${formatUsername(ctx.from)}\n✅ Confirmed!`
+            `🎉 Your Telegram referral was confirmed!\n\n` +
+              `User: ${formatUsername(ctx.from)}\n✅ Confirmed by first group message.`
           );
         } catch (error) {
           console.error('Failed to notify referrer:', error.message);
@@ -1112,6 +1135,7 @@ async function main() {
     { command: 'connect', description: 'Start the linking flow' },
     { command: 'profile', description: 'Your Arkeza profile (XP, referrals)' },
     { command: 'leaderboard', description: 'Group referral leaderboard' },
+    { command: 'tgreferrals', description: 'Your confirmed Telegram referrals' },
     { command: 'refcontest', description: 'App referral contest + last week winners' },
     { command: 'stats', description: 'Your referral stats' },
     { command: 'website', description: 'Arkeza website' },
