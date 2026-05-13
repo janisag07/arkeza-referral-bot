@@ -677,6 +677,26 @@ bot.command('tgreferrals', async (ctx) => {
   await renderTelegramReferralStats(ctx);
 });
 
+async function startTelegramReferralCycle(ctx, label = null) {
+  if (!isAdmin(ctx.from.id)) {
+    await ctx.reply('❌ Admin only.');
+    return;
+  }
+
+  const startedAt = db.startNewCycle(ctx.from.id, label || null);
+  const iso = new Date(startedAt * 1000).toISOString();
+  await ctx.reply(
+    `🔄 Telegram referral count reset.\n\n` +
+      `New cycle start: ${iso.slice(0, 16).replace('T', ' ')} UTC\n` +
+      `Only Telegram referrals confirmed after this moment will show in /tgreferrals and /leaderboard.`
+  );
+}
+
+// Legacy/admin shortcut Patrick expects for clearing the visible Telegram count.
+bot.command('cycle', async (ctx) => {
+  await startTelegramReferralCycle(ctx, ctx.match?.trim() || null);
+});
+
 // ---- /stats (legacy, in-bot referrals) ----
 
 bot.command('stats', async (ctx) => {
@@ -1138,6 +1158,7 @@ async function main() {
     { command: 'profile', description: 'Your Arkeza profile (XP, referrals)' },
     { command: 'leaderboard', description: 'Group referral leaderboard' },
     { command: 'tgreferrals', description: 'Your confirmed Telegram referrals' },
+    { command: 'cycle', description: 'Admin: reset Telegram referral cycle' },
     { command: 'refcontest', description: 'App referral contest + last week winners' },
     { command: 'stats', description: 'Your referral stats' },
     { command: 'website', description: 'Arkeza website' },
