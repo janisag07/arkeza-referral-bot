@@ -309,8 +309,8 @@ button { font: inherit; cursor: pointer; }
   margin-bottom: var(--s-5);
 }
 .hero h1 {
-  font-size: clamp(2.9rem, 7.2vw, 5.4rem);
-  max-width: 17ch;
+  font-size: clamp(2.6rem, 6vw, 4.6rem);
+  max-width: 24ch;
   margin: 0 auto var(--s-5);
   text-shadow: 0 2px 40px rgba(0, 0, 0, 0.35);
 }
@@ -759,7 +759,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ---------- FAQ ---------- */
-.faq-list { max-width: 720px; margin: 0 auto; }
+.faq-list { max-width: 720px; }
 .faq-item { border-bottom: 1px solid var(--line); }
 .faq-q {
   width: 100%;
