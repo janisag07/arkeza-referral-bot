@@ -8,3 +8,6 @@ node_modules/
 keys/*.pem
 keys/*.key
 !keys/README.md
+
+# NexAgent
+nexagent/skills/ui-ux-pro-max/scripts/__pycache__/
