@@ -6,10 +6,17 @@ import {
   PRICING, FAQ, NAV_LINKS, TRUST_ITEMS,
 } from './content.js'
 
-/* ---------- Navigation ---------- */
+/* ---------- Navigation: transparent über dem Hero, Paper nach dem Scrollen ---------- */
 export function Nav() {
+  const [scrolled, setScrolled] = useState(false)
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 40)
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
   return (
-    <header className="nav">
+    <header className={`nav${scrolled ? ' scrolled' : ''}`}>
       <div className="container nav-inner">
         <a href="#" className="logo" aria-label="NexAgent — zur Startseite">
           <span className="logo-mark" aria-hidden />
@@ -19,7 +26,7 @@ export function Nav() {
           {NAV_LINKS.map((l) => (
             <a key={l.href} href={l.href}>{l.label}</a>
           ))}
-          <a href="#kontakt" className="btn btn-primary btn-sm">Kostenlose Demo</a>
+          <a href="#kontakt" className="btn-nav">Kostenlose Demo</a>
         </nav>
       </div>
     </header>
@@ -75,25 +82,41 @@ function LiveMonitor() {
   )
 }
 
+// Silhouette einer Dachlinie am Horizont — abstrahierter Betrieb bei Morgendämmerung.
+function Horizon() {
+  return (
+    <div className="hero-horizon" aria-hidden>
+      <svg viewBox="0 0 1440 130" preserveAspectRatio="none">
+        <path
+          d="M0 130 L0 96 L90 96 L90 74 L150 74 L150 92 L260 92 L260 58 L288 58 L288 44 L316 44 L316 58 L344 58 L344 92 L470 92 L470 70 L555 70 L555 84 L640 84 L640 52 L668 52 L668 38 L700 38 L700 52 L730 52 L730 84 L860 84 L860 96 L960 96 L960 66 L1050 66 L1050 88 L1150 88 L1150 74 L1240 74 L1240 92 L1320 92 L1320 80 L1440 80 L1440 130 Z"
+          fill="#0A0D14"
+        />
+      </svg>
+    </div>
+  )
+}
+
 export function Hero() {
   return (
     <section className="hero">
-      <div className="container hero-grid">
-        <div>
-          <p className="kicker">Interne KI-Systeme für den Mittelstand</p>
-          <h1>
-            Ihre Büroarbeit läuft ab jetzt <em>im Hintergrund</em>.
-          </h1>
-          <p className="hero-sub">
-            NexAgent baut KI-Systeme, die Rechnungen, Angebote und Berichte automatisch
-            erledigen — angebunden an Ihre bestehenden Programme, DSGVO-konform.{' '}
-            <strong>Sie zahlen erst, wenn es läuft.</strong>
-          </p>
-          <div className="hero-actions">
-            <a href="#kontakt" className="btn btn-primary">Demo anfragen</a>
-            <a href="#ablauf" className="btn btn-ghost">So läuft ein System</a>
-          </div>
+      <div className="hero-sky" aria-hidden />
+      <div className="hero-grain" aria-hidden />
+      <Horizon />
+      <div className="container">
+        <p className="hero-kicker">Interne KI-Systeme für den Mittelstand</p>
+        <h1>
+          Bringen Sie Ihre Büroarbeit <em>zum Laufen</em> — ohne eine Hand zu rühren.
+        </h1>
+        <p className="hero-sub">
+          NexAgent baut Systeme, die Rechnungen, Angebote und Berichte im Hintergrund
+          erledigen. Angebunden an Ihre Programme, DSGVO-konform.{' '}
+          <strong>Sie zahlen erst, wenn es läuft.</strong>
+        </p>
+        <div className="hero-actions">
+          <a href="#kontakt" className="btn btn-light">Demo anfragen</a>
+          <a href="#ablauf" className="btn btn-outline-light">So läuft ein System</a>
         </div>
+        <p className="hero-note">Kostenlose Machbarkeits-Demo · Region Nürnberg &amp; Ansbach · deutschlandweit</p>
         <LiveMonitor />
       </div>
     </section>
@@ -124,7 +147,7 @@ export function Systems() {
       <div className="container">
         <div className={`section-head reveal${inView ? ' in' : ''}`}>
           <p className="kicker">Systeme</p>
-          <h2>Vier Systeme. Ein ruhigerer Betrieb.</h2>
+          <h2>Vier Systeme. Ein <em>ruhigerer</em> Betrieb.</h2>
           <p>
             Jedes System übernimmt einen klar umrissenen Teil Ihrer wiederkehrenden
             Arbeit — einzeln startbar, beliebig kombinierbar.
@@ -180,11 +203,11 @@ export function Pipeline() {
   const done = progress >= PIPELINE_STEPS.length
 
   return (
-    <section className="section" id="demo" ref={ref}>
+    <section className="section pipeline-section" id="demo" ref={ref}>
       <div className="container">
         <div className={`section-head reveal${inView ? ' in' : ''}`}>
           <p className="kicker">Live-Demo</p>
-          <h2>So verbucht sich eine Rechnung selbst.</h2>
+          <h2>So verbucht sich eine Rechnung <em>selbst</em>.</h2>
           <p>
             Beispielhafter Durchlauf einer eingehenden Rechnung — genau so arbeitet
             ein NexAgent-System in Ihrem Betrieb.
@@ -243,7 +266,7 @@ export function RoiCalc() {
       <div className="container">
         <div className={`section-head reveal${inView ? ' in' : ''}`}>
           <p className="kicker">Rechner</p>
-          <h2>Was kostet Sie die Routine wirklich?</h2>
+          <h2>Was kostet Sie die Routine <em>wirklich</em>?</h2>
           <p>
             Zwei Regler, eine ehrliche Zahl: Ihr jährliches Einsparpotenzial,
             konservativ gerechnet.
@@ -336,7 +359,7 @@ export function Pricing() {
       <div className="container">
         <div className={`section-head reveal${inView ? ' in' : ''}`}>
           <p className="kicker">Preise</p>
-          <h2>Festpreise. Keine Überraschungen.</h2>
+          <h2>Festpreise. Keine <em>Überraschungen</em>.</h2>
           <p>
             Alle Preise netto. Der Pilot ist der risikofreie Einstieg — die Systeme
             sind der laufende Betrieb.
@@ -445,7 +468,7 @@ export function Contact() {
   }
 
   return (
-    <section className="section" id="kontakt" ref={ref}>
+    <section className="section contact-section" id="kontakt" ref={ref}>
       <div className="container contact-wrap">
         <div className={`section-head reveal${inView ? ' in' : ''}`} style={{ margin: '0 auto var(--s-7)' }}>
           <p className="kicker" style={{ justifyContent: 'center' }}>Kontakt</p>
