@@ -118,7 +118,7 @@ button { font: inherit; cursor: pointer; }
 .btn-sm { min-height: 40px; padding: 0 var(--s-4); font-size: 0.9375rem; }
 
 /* ---------- Abschnitts-Gerüst ---------- */
-.section { padding: var(--s-9) 0; }
+.section { padding: var(--s-9) 0; scroll-margin-top: 64px; }
 .section-head { max-width: 640px; margin-bottom: var(--s-7); }
 .kicker {
   font-family: var(--font-mono);
