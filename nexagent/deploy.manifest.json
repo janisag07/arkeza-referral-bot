@@ -1,0 +1,33 @@
+{
+  "version": 0,
+  "project": {
+    "name": "nexagent-website",
+    "framework": "vite"
+  },
+  "build": {
+    "buildCommand": "vite build"
+  },
+  "env": [
+    {
+      "name": "ADMIN_CODE",
+      "required": true
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "required": true
+    },
+    {
+      "name": "CHAT_MODEL",
+      "required": true
+    },
+    {
+      "name": "SUPABASE_SERVICE_KEY",
+      "required": true
+    },
+    {
+      "name": "SUPABASE_URL",
+      "required": true
+    }
+  ],
+  "environments": {}
+}
